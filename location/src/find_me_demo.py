@@ -1,9 +1,21 @@
 import numpy as np
 import scipy.io.wavfile as wav
 import pyroomacoustics as pra
-from serpapi import GoogleSearch
+import serpapi
 
 audio_files = ["./../data/clap_test.wav"]  # List of audio files to process
+
+def get_phone_coordinates(query: str, api_key: str, lat: float, lng: float):
+    client = serpapi.Client(api_key=api_key)
+    results = client.search({
+    "engine": "google_maps",
+    "q": query,
+    "ll": "@" + str(lat) + "," + str(lng) + ",14z"
+    })
+    local_results = results["local_results"]
+    
+    
+
 
 def get_time_delay(audio_file):
     # 1. Load multichannel recording from the phone (e.g., 2 or 3 channels)
