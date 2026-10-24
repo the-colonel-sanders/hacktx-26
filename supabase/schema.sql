@@ -74,6 +74,11 @@ alter table detections add column if not exists x float8, add column if not exis
 -- measured from a reference sound at a known spot and subtracted from every detection.
 alter table devices add column if not exists time_offset_ms float8 not null default 0;
 
+-- How much to trust each detection's arrival time (see timeSigmaMs in lib/localize.ts).
+alter table devices    add column if not exists time_calibrated_at timestamptz;
+alter table devices    add column if not exists clock_rtt_ms float8;  -- round trip of the best clock-sync sample
+alter table detections add column if not exists time_sigma_ms float8;  -- expected arrival-time error when heard
+
 create table if not exists timing_calibrations (
   id          uuid primary key default gen_random_uuid(),
   x           float8 not null,  -- where the reference sound is made

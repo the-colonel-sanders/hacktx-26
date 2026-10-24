@@ -56,6 +56,7 @@ export async function checkIn(
     deviceId: await claimDeviceId(),
     ...location,
     clockOffsetMs: sync.offsetMs,
+    clockRttMs: sync.rttMs,
   });
   tabDeviceId = deviceId;
   try {

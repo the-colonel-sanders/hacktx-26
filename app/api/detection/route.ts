@@ -2,7 +2,7 @@ import { z } from "zod";
 import { nearestRoom, positionOf, type Room } from "@/lib/floorplan";
 import { fail, json, parseBody } from "@/lib/http";
 import { getOrCreateActiveIncident, type TrailPoint } from "@/lib/incidents";
-import { SHOT_WINDOW_MS, gridSearch, groupShot, type Heatmap } from "@/lib/localize";
+import { CLIP_DB, SHOT_WINDOW_MS, gridSearch, groupShot, timeSigmaMs, type Heatmap } from "@/lib/localize";
 import { db } from "@/lib/supabase";
 
 const Body = z.object({
@@ -27,6 +27,11 @@ export async function POST(req: Request) {
     // Server clock, minus this phone's calibrated audio-pipeline delay.
     const spikeTsMs = localSpikeTsMs + device.clock_offset_ms - (device.time_offset_ms ?? 0);
     const normPeakDb = peakDb - device.gain_offset_db;
+    const timeSigma = timeSigmaMs({
+      exact: device.x != null && device.y != null,
+      calibrated: device.time_calibrated_at != null,
+      syncRttMs: device.clock_rtt_ms,
+    });
     // 2. First confirmed detection raises the building-wide alert.
     const [{ incident }] = await Promise.all([
       getOrCreateActiveIncident(),
@@ -43,6 +48,7 @@ export async function POST(req: Request) {
       spike_ts_ms: spikeTsMs,
       raw_peak_db: peakDb,
       norm_peak_db: normPeakDb,
+      time_sigma_ms: timeSigma,
       confidence,
       label,
     });
@@ -53,7 +59,7 @@ export async function POST(req: Request) {
       await Promise.all([
         db()
           .from("detections")
-          .select("device_id, room_id, x, y, spike_ts_ms, norm_peak_db")
+          .select("device_id, room_id, x, y, spike_ts_ms, raw_peak_db, norm_peak_db, time_sigma_ms")
           .eq("incident_id", incident.id)
           .gte("spike_ts_ms", spikeTsMs - SHOT_WINDOW_MS)
           .lte("spike_ts_ms", spikeTsMs + SHOT_WINDOW_MS),
@@ -69,7 +75,11 @@ export async function POST(req: Request) {
       nearby.map((d) => ({
         deviceId: d.device_id as string,
         pos: positionOf(d, roomById)!,
-        exact: d.x != null && d.y != null,
+        // Rows from before time_sigma_ms existed: treat as uncalibrated.
+        timeSigmaMs:
+          (d.time_sigma_ms as number | null) ??
+          timeSigmaMs({ exact: d.x != null && d.y != null, calibrated: false, syncRttMs: null }),
+        clipped: (d.raw_peak_db as number) >= CLIP_DB,
         spikeTsMs: d.spike_ts_ms as number,
         normPeakDb: d.norm_peak_db as number,
       })),
@@ -81,7 +91,15 @@ export async function POST(req: Request) {
     let y: number;
     let heatmap: Heatmap | null = null;
     if (shot.length >= 2) {
-      const est = gridSearch(shot.map((d) => ({ ...d.pos, exact: d.exact, normPeakDb: d.normPeakDb, spikeTsMs: d.spikeTsMs })));
+      const est = gridSearch(
+        shot.map((d) => ({
+          ...d.pos,
+          timeSigmaMs: d.timeSigmaMs,
+          clipped: d.clipped,
+          normPeakDb: d.normPeakDb,
+          spikeTsMs: d.spikeTsMs,
+        })),
+      );
       x = est.x;
       y = est.y;
       heatmap = est.heatmap;

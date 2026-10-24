@@ -70,7 +70,7 @@ export default function FloorMap({ incident }: { incident: IncidentView }) {
       const col = Math.round((mx - heatmap.originX) / heatmap.resolution);
       const row = Math.round((my - heatmap.originY) / heatmap.resolution);
       if (col >= 0 && col < heatmap.width && row >= 0 && row < heatmap.height) {
-        lines.push(`Likelihood ${Math.round(heatmap.values[row * heatmap.width + col] * 100)}%`);
+        lines.push(`Relative likelihood ${Math.round(heatmap.values[row * heatmap.width + col] * 100)}%`);
       }
     }
     setHover({ left: e.clientX - box.left, top: e.clientY - box.top, lines });
@@ -180,7 +180,7 @@ export default function FloorMap({ incident }: { incident: IncidentView }) {
 
       <ul className={s.legend}>
         <li>
-          <span className={s.gradient} aria-hidden /> Likelihood: low → high
+          <span className={s.gradient} aria-hidden /> Likelihood vs. best spot: low → high
         </li>
         <li>
           <svg width="12" height="12" aria-hidden>

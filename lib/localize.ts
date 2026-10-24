@@ -1,17 +1,18 @@
 import { FLOOR_BOUNDS, type Bounds } from "./floorplan";
 
-// Tunables
-export const W_LOUD = 1;
-export const W_ORDER = 10;
-export const W_TIME = 1;
-export const HEATMAP_T = 5;
+// Tunables. The cost is a χ² (each residual divided by its expected error), so the heatmap
+// exp(−Δχ²/2) is the likelihood relative to the best cell.
 export const SPEED_OF_SOUND_MPS = 343;
-// Expected arrival-time error. Phones placed by room center can be several meters (≈10 ms) off.
-export const TIME_SIGMA_EXACT_MS = 3;
-export const TIME_SIGMA_ROOM_MS = 10;
+// Expected loudness error: phone mics, orientation and walls differ by several dB even after gain calibration.
+export const LOUD_SIGMA_DB = 4;
+// Expected arrival-time error from the audio pipeline, with and without timing calibration.
+export const TIME_SIGMA_CALIBRATED_MS = 3;
+export const TIME_SIGMA_UNCALIBRATED_MS = 20;
+export const ROOM_POS_SIGMA_M = 3; // a phone placed by room center can be this far from its real spot
+export const DEFAULT_SYNC_RTT_MS = 30; // assumed clock-sync round trip when the phone didn't report one
+export const CLIP_DB = -1; // raw peaks at or above this (dBFS) are clipped: the sound was at least this loud
 export const GRID_RESOLUTION_M = 0.5;
 export const MIN_DIST_M = 0.5;
-export const ORDER_MIN_GAP_MS = 15; // ignore arrival-order pairs closer than this
 export const SHOT_WINDOW_MS = 300; // detections within ±this belong to the same shot
 export const REFERENCE_DB = -10; // expected peak of the reference calibration clap
 
@@ -20,8 +21,23 @@ export type Observation = {
   y: number;
   normPeakDb: number;
   spikeTsMs: number;
-  exact?: boolean; // true if x/y is the phone's real spot, not its room center
+  timeSigmaMs?: number; // expected arrival-time error, see timeSigmaMs(); default TIME_SIGMA_CALIBRATED_MS
+  clipped?: boolean; // the mic saturated, so normPeakDb is only a lower bound
 };
+
+/**
+ * Expected arrival-time error for one phone's detection: audio pipeline + clock sync + position.
+ * The sync error is uniform within ±rtt/2 (σ = rtt/√12). A calibrated phone's offset absorbed the
+ * sync error at calibration time, but the clock has been re-synced since, so it carries the
+ * difference of two syncs (twice the variance).
+ */
+export function timeSigmaMs(p: { exact: boolean; calibrated: boolean; syncRttMs: number | null }): number {
+  const pipeline = p.calibrated ? TIME_SIGMA_CALIBRATED_MS : TIME_SIGMA_UNCALIBRATED_MS;
+  const rtt = p.syncRttMs ?? DEFAULT_SYNC_RTT_MS;
+  const syncVar = ((p.calibrated ? 2 : 1) * rtt * rtt) / 12;
+  const posMs = p.exact ? 0 : (ROOM_POS_SIGMA_M / SPEED_OF_SOUND_MPS) * 1000;
+  return Math.sqrt(pipeline * pipeline + syncVar + posMs * posMs);
+}
 
 export type Heatmap = {
   width: number;
@@ -43,24 +59,33 @@ export function cellCost(cx: number, cy: number, obs: Observation[]): number {
     logD[i] = 20 * Math.log10(dist[i]);
   }
 
-  // Loudness: L_i = L0 − 20·log10(d_i), with L0 fit as the mean.
+  // Loudness: L_i = L0 − 20·log10(d_i), with L0 fit as the mean over unclipped phones.
+  // A clipped phone only says the sound was at least that loud, so it counts only when the model predicts quieter.
   let l0 = 0;
-  for (let i = 0; i < n; i++) l0 += obs[i].normPeakDb + logD[i];
-  l0 /= n;
-  let loudCost = 0;
+  let unclipped = 0;
   for (let i = 0; i < n; i++) {
-    const r = obs[i].normPeakDb - (l0 - logD[i]);
-    loudCost += r * r;
+    if (obs[i].clipped) continue;
+    l0 += obs[i].normPeakDb + logD[i];
+    unclipped++;
+  }
+  let loudCost = 0;
+  if (unclipped > 0) {
+    l0 /= unclipped;
+    for (let i = 0; i < n; i++) {
+      const r = obs[i].normPeakDb - (l0 - logD[i]);
+      if (!obs[i].clipped || r > 0) loudCost += r * r;
+    }
   }
 
   // Arrival time: t_i = t0 + d_i / c, with the unknown fire time t0 fit as a weighted mean.
-  // Equivalent to matching every pair's time gap to its distance gap (a hyperbola per pair).
+  // Equivalent to matching every pair's time gap to its distance gap (a hyperbola per pair),
+  // which already covers arrival order.
   let wSum = 0;
   let t0 = 0;
   const w = new Array<number>(n);
   const travelMs = new Array<number>(n);
   for (let i = 0; i < n; i++) {
-    const sigma = obs[i].exact ? TIME_SIGMA_EXACT_MS : TIME_SIGMA_ROOM_MS;
+    const sigma = obs[i].timeSigmaMs ?? TIME_SIGMA_CALIBRATED_MS;
     w[i] = 1 / (sigma * sigma);
     travelMs[i] = (dist[i] / SPEED_OF_SOUND_MPS) * 1000;
     t0 += w[i] * (obs[i].spikeTsMs - travelMs[i]);
@@ -73,15 +98,7 @@ export function cellCost(cx: number, cy: number, obs: Observation[]): number {
     timeCost += w[i] * r * r;
   }
 
-  // Arrival order: whoever clearly heard it first should be closer.
-  let orderViolations = 0;
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      if (obs[i].spikeTsMs < obs[j].spikeTsMs - ORDER_MIN_GAP_MS && dist[i] > dist[j]) orderViolations++;
-    }
-  }
-
-  return W_LOUD * loudCost + W_TIME * timeCost + W_ORDER * orderViolations;
+  return loudCost / (LOUD_SIGMA_DB * LOUD_SIGMA_DB) + timeCost;
 }
 
 export function gridSearch(
@@ -107,8 +124,8 @@ export function gridSearch(
     }
   }
 
-  // exp(−Δcost/T) is already 1 at the minimum, so it's normalized to 0..1.
-  const values = costs.map((c) => Math.round(Math.exp(-(c - minCost) / HEATMAP_T) * 100) / 100);
+  // Likelihood relative to the best cell: exp(−Δχ²/2), already 1 at the minimum.
+  const values = costs.map((c) => Math.round(Math.exp(-(c - minCost) / 2) * 100) / 100);
 
   return {
     x: bounds.minX + (bestIdx % width) * resolution,

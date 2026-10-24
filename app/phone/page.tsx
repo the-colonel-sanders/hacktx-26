@@ -15,7 +15,7 @@ import {
   type PhoneLocation,
   type Sync,
 } from "./api";
-import { keepAwake, startListening, type Level, type Spike } from "./audio";
+import { keepAwake, startListening, type AwakeStatus, type Level, type Spike } from "./audio";
 import { MIN_CONFIDENCE, classify } from "./detector";
 import PositionPicker from "./PositionPicker";
 import s from "./phone.module.css";
@@ -47,6 +47,7 @@ export default function PhonePage() {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [sync, setSync] = useState<Sync | null>(null);
   const [level, setLevel] = useState<Level | null>(null);
+  const [awake, setAwake] = useState<AwakeStatus | null>(null);
   const [calibrating, setCalibrating] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [incident, setIncident] = useState<ActiveIncident>(null);
@@ -211,7 +212,7 @@ export default function PhonePage() {
       // Mic first: it needs the tap's user activation, which awaiting the network could use up.
       const listener = await startListening(onSpike, setLevel);
       cleanups.current.push(listener.stop);
-      cleanups.current.push(await keepAwake());
+      cleanups.current.push(await keepAwake(setAwake));
 
       const res = await checkIn(location);
       const mySpot = "x" in location ? location : null;
@@ -407,7 +408,18 @@ export default function PhonePage() {
               <dd>{sync ? `${sync.offsetMs.toFixed(0)} ms (±${(sync.rttMs / 2).toFixed(0)} ms)` : "—"}</dd>
               <dt>Device</dt>
               <dd className={s.mono}>{deviceId?.slice(0, 8)}</dd>
+              <dt>Screen</dt>
+              <dd className={awake === "off" ? s.warnText : undefined}>
+                {awake === "on" ? "✓ Kept on" : awake === "fallback" ? "✓ Kept on (older-browser mode)" : "⚠ May turn off"}
+              </dd>
             </dl>
+            {awake === "off" && (
+              <p className={s.warnBox}>
+                This browser won&apos;t keep the screen on (battery saver can block it). If the screen turns off, the mic
+                stops listening. Tap anywhere to retry, turn off battery saver, or set Auto-Lock / Screen timeout to
+                Never in Settings while testing.
+              </p>
+            )}
           </section>
 
           <section className={s.card}>
