@@ -24,7 +24,7 @@ sd.wait()
 print("Recording complete!")
 
 # Save recording as a WAV file
-write("./../audio/clap_test.wav", SAMPLE_RATE, recording)
+write("./../../location/data/clap_test.wav", SAMPLE_RATE, recording)
 
 # Convert recording into a 1D array
 audio = recording[:, 0]
