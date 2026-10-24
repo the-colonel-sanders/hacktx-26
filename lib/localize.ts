@@ -132,3 +132,21 @@ export function groupShot<D extends { deviceId: string; spikeTsMs: number; normP
   }
   return [...byDevice.values()];
 }
+
+export type TimingReport = { deviceId: string; x: number; y: number; spikeTsMs: number };
+export type TimingBias = { deviceId: string; distanceM: number; biasMs: number };
+
+/**
+ * Timing calibration from one reference sound made at a known spot.
+ * Each phone should hear it at t0 + d_i / c. The fire time t0 is unknown, so only differences
+ * between phones are measurable: bias_i = (t_i − d_i/c) − mean over phones. Biases sum to zero,
+ * which is all localization needs (it only compares arrival times).
+ */
+export function timingBiases(src: { x: number; y: number }, reports: TimingReport[]): TimingBias[] {
+  const withDist = reports.map((r) => {
+    const distanceM = Math.hypot(r.x - src.x, r.y - src.y);
+    return { ...r, distanceM, emitted: r.spikeTsMs - (distanceM / SPEED_OF_SOUND_MPS) * 1000 };
+  });
+  const t0 = withDist.reduce((sum, r) => sum + r.emitted, 0) / withDist.length;
+  return withDist.map((r) => ({ deviceId: r.deviceId, distanceM: r.distanceM, biasMs: r.emitted - t0 }));
+}

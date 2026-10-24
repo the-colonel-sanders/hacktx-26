@@ -24,7 +24,8 @@ export async function POST(req: Request) {
     if (devErr) throw devErr;
     if (!device) return fail("Unknown deviceId", 404);
 
-    const spikeTsMs = localSpikeTsMs + device.clock_offset_ms;
+    // Server clock, minus this phone's calibrated audio-pipeline delay.
+    const spikeTsMs = localSpikeTsMs + device.clock_offset_ms - (device.time_offset_ms ?? 0);
     const normPeakDb = peakDb - device.gain_offset_db;
     // 2. First confirmed detection raises the building-wide alert.
     const [{ incident }] = await Promise.all([

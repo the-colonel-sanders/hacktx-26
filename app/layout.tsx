@@ -15,6 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Link href="/">Docs</Link>
           <Link href="/incident">Incident dashboard</Link>
           <Link href="/phone">Phone</Link>
+          <Link href="/calibrate">Timing calibration</Link>
           <Link href="/qr">Room QR codes</Link>
           <a href="/api/incidents/current" target="_blank" rel="noreferrer">
             Raw JSON

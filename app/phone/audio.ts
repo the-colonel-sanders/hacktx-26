@@ -22,7 +22,7 @@ export async function startListening(onSpike: (s: Spike) => void, onLevel: (l: L
   source.connect(node);
 
   // Mic → worklet delay, when the browser reports it (Chrome does). Otherwise assume ~0;
-  // it's roughly constant per phone, which matters far less than ML latency would.
+  // what's left is constant per phone and removed by timing calibration.
   const track = stream.getAudioTracks()[0];
   const inputLatencyMs = ((track.getSettings() as { latency?: number }).latency ?? 0) * 1000;
 
@@ -31,9 +31,8 @@ export async function startListening(onSpike: (s: Spike) => void, onLevel: (l: L
     if (msg.type === "level") onLevel(msg);
     else if (msg.type === "spike") {
       // Convert the onset's AudioContext time to our wall clock *right now*, before any ML runs.
-      const ageMs = (context.currentTime - msg.onsetTime) * 1000;
       onSpike({
-        localSpikeTsMs: now() - ageMs - inputLatencyMs,
+        localSpikeTsMs: contextToWallMs(context, msg.onsetTime) - inputLatencyMs,
         peakDb: msg.peakDb,
         samples: msg.samples,
         sampleRate: msg.sampleRate,
@@ -52,6 +51,25 @@ export async function startListening(onSpike: (s: Spike) => void, onLevel: (l: L
       context.close();
     },
   };
+}
+
+/**
+ * Wall-clock time (same clock as `now()`) at which audio-context time `ctxTime` was captured.
+ *
+ * Reading `context.currentTime` against `now()` is jittery: currentTime advances in whole
+ * device buffers (~10 ms on Windows), so the pair is off by however far into the buffer we read.
+ * getOutputTimestamp() returns a matched pair (context time, performance time) for the moment a
+ * frame reaches the speaker; frames are rendered `baseLatency + outputLatency` before that, and
+ * an input frame is processed as it is rendered.
+ */
+function contextToWallMs(context: AudioContext, ctxTime: number): number {
+  const ts = context.getOutputTimestamp?.();
+  if (ts?.contextTime && ts.performanceTime) {
+    const renderAheadMs = ((context.baseLatency ?? 0) + (context.outputLatency ?? 0)) * 1000;
+    return performance.timeOrigin + ts.performanceTime + (ctxTime - ts.contextTime) * 1000 - renderAheadMs;
+  }
+  // Older browsers: fall back to the jittery pair.
+  return now() - (context.currentTime - ctxTime) * 1000;
 }
 
 /** Keep the screen on — the mic stops when the page is backgrounded (especially on iOS). */

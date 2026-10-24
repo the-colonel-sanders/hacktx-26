@@ -3,13 +3,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ROOMS, inBounds } from "@/lib/floorplan";
 import { browserDb } from "@/lib/supabaseBrowser";
-import { calibrate, checkIn, now, sendDetection, sendStatus, type PhoneLocation, type Sync } from "./api";
+import {
+  calibrate,
+  checkIn,
+  getTimingCal,
+  now,
+  reportTimingCal,
+  sendDetection,
+  sendStatus,
+  type ActiveTimingCal,
+  type PhoneLocation,
+  type Sync,
+} from "./api";
 import { keepAwake, startListening, type Level, type Spike } from "./audio";
 import { MIN_CONFIDENCE, classify } from "./detector";
 import PositionPicker from "./PositionPicker";
 import s from "./phone.module.css";
 
-const RESYNC_MS = 3 * 60_000; // phone clocks drift; re-check-in periodically
+// Phone clocks drift (tens of ppm ≈ a few ms per minute), and arrival times are compared
+// to a few ms, so re-sync often.
+const RESYNC_MS = 60_000;
+const TIMING_CAL_POLL_MS = 2_000;
 const POLL_MS = 10_000; // fallback in case Realtime drops
 const LOCATION_KEY = "gunshot.location";
 const TEST_WINDOW_MS = 10_000; // simulated shots in the same window (server clock) are one shot
@@ -45,6 +59,9 @@ export default function PhonePage() {
 
   const deviceRef = useRef<string | null>(null);
   const calibratingRef = useRef(false);
+  // While a timing calibration runs, sounds go to it instead of being reported as shots.
+  const [timingCal, setTimingCal] = useState<ActiveTimingCal>(null);
+  const timingCalRef = useRef<ActiveTimingCal>(null);
   const cleanups = useRef<(() => void)[]>([]);
 
   const addLog = (text: string, tone?: LogEntry["tone"]) =>
@@ -119,6 +136,21 @@ export default function PhonePage() {
 
   useEffect(() => () => cleanups.current.forEach((f) => f()), []);
 
+  // Watch for a timing calibration while listening.
+  useEffect(() => {
+    if (phase !== "listening") return;
+    const check = async () => {
+      try {
+        const cal = await getTimingCal();
+        timingCalRef.current = cal;
+        setTimingCal(cal);
+      } catch {}
+    };
+    check();
+    const t = setInterval(check, TIMING_CAL_POLL_MS);
+    return () => clearInterval(t);
+  }, [phase]);
+
   // Countdown to the next simulated-shot window, so testers can tap together.
   useEffect(() => {
     if (!sync) return;
@@ -132,6 +164,11 @@ export default function PhonePage() {
     const deviceId = deviceRef.current;
     if (!deviceId) return;
     try {
+      if (timingCalRef.current) {
+        const { kept } = await reportTimingCal(deviceId, spike.localSpikeTsMs, spike.peakDb);
+        addLog(`Timing calibration: heard reference at ${spike.peakDb.toFixed(0)} dB (kept ${kept})`, "sent");
+        return;
+      }
       if (calibratingRef.current) {
         calibratingRef.current = false;
         setCalibrating(false);
@@ -383,6 +420,14 @@ export default function PhonePage() {
               </span>
             </label>
           </section>
+
+          {timingCal && (
+            <p className={s.calBanner}>
+              <b>Timing calibration running.</b> Make one sharp sound at ({timingCal.x}, {timingCal.y}) m. Sounds this
+              phone hears now are used for calibration, not reported as shots.
+              {!checkedIn?.spot && " This phone is checked in by room, so it can't take part. Use an exact spot."}
+            </p>
+          )}
 
           <section className={s.card}>
             <h2 className={s.h2}>Simulate a shot (testing)</h2>

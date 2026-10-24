@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FLOOR_BOUNDS, ROOMS, nearestRoom } from "./floorplan";
-import { cellCost, gridSearch, groupShot, type Observation } from "./localize";
+import { cellCost, gridSearch, groupShot, timingBiases, type Observation } from "./localize";
 
 const SPEED_OF_SOUND = 343; // m/s
 
@@ -145,5 +145,59 @@ describe("nearestRoom", () => {
   it("picks the closest room center", () => {
     expect(nearestRoom(13, 3.5, ROOMS)!.id).toBe("hall-c");
     expect(nearestRoom(17, -1, ROOMS)!.id).toBe("204");
+  });
+});
+
+describe("timingBiases", () => {
+  it("recovers each phone's constant delay (relative to the average)", () => {
+    const src = { x: 10, y: 2 };
+    const phones = [
+      { deviceId: "a", x: 5, y: 2, delay: 0 },
+      { deviceId: "b", x: 20, y: -1, delay: 40 }, // slow Android
+      { deviceId: "c", x: 12, y: 6, delay: 5 },
+    ];
+    const fire = 1_000_000;
+    const biases = timingBiases(
+      src,
+      phones.map((p) => ({
+        ...p,
+        spikeTsMs: fire + (Math.hypot(p.x - src.x, p.y - src.y) / SPEED_OF_SOUND) * 1000 + p.delay,
+      })),
+    );
+    const meanDelay = 15;
+    for (const p of phones) {
+      expect(biases.find((b) => b.deviceId === p.deviceId)!.biasMs).toBeCloseTo(p.delay - meanDelay, 6);
+    }
+    expect(biases.reduce((s, b) => s + b.biasMs, 0)).toBeCloseTo(0, 6);
+  });
+
+  it("correcting by the biases makes a later shot locate correctly", () => {
+    const delays = [0, 40, 5, 25];
+    const PHONES = [
+      { x: 5, y: 2 },
+      { x: 20, y: -1 },
+      { x: 12, y: 6 },
+      { x: 0, y: -3 },
+    ];
+    const hear = (sx: number, sy: number) =>
+      PHONES.map((p, i) => {
+        const d = Math.max(0.5, Math.hypot(sx - p.x, sy - p.y));
+        return { ...p, d, t: (d / SPEED_OF_SOUND) * 1000 + delays[i] };
+      });
+    // Calibrate with a reference sound at (10, 2).
+    const biases = timingBiases(
+      { x: 10, y: 2 },
+      hear(10, 2).map((h, i) => ({ deviceId: String(i), x: h.x, y: h.y, spikeTsMs: h.t })),
+    );
+    // A shot at (22, 4), corrected.
+    const obs: Observation[] = hear(22, 4).map((h, i) => ({
+      x: h.x,
+      y: h.y,
+      exact: true,
+      normPeakDb: -5 - 20 * Math.log10(h.d),
+      spikeTsMs: h.t - biases[i].biasMs,
+    }));
+    const est = gridSearch(obs);
+    expect(Math.hypot(est.x - 22, est.y - 4)).toBeLessThan(0.75);
   });
 });

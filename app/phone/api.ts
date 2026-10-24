@@ -121,3 +121,14 @@ export const sendDetection = (body: {
 
 export const sendStatus = (deviceId: string, status: "safe" | "need_help" | "injured") =>
   post("/api/status", { deviceId, status });
+
+export type ActiveTimingCal = { id: string; x: number; y: number } | null;
+
+export async function getTimingCal(): Promise<ActiveTimingCal> {
+  const res = await fetch("/api/timing-cal", { cache: "no-store" });
+  const data = await res.json();
+  return res.ok && data.active ? { id: data.active.id, x: data.active.x, y: data.active.y } : null;
+}
+
+export const reportTimingCal = (deviceId: string, localSpikeTsMs: number, peakDb: number) =>
+  post<{ calibrationId: string; kept: string }>("/api/timing-cal/report", { deviceId, localSpikeTsMs, peakDb });
