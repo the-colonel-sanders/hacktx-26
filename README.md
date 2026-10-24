@@ -72,3 +72,7 @@ All bodies are JSON; invalid input returns `400 { error }`.
 `lib/localize.ts` — pure functions, tunables exported at the top (`W_LOUD`, `W_ORDER`, `HEATMAP_T`, `SHOT_WINDOW_MS`, ...). For every 0.5 m cell, cost = loudness-model residuals (inverse-square falloff with fitted source level) + 10 × arrival-order violations; the best cell is the estimate.
 
 Known limit: phones only report their room center, and loudness/order can't tell which side of a line of phones a sound came from. That's why the hallway has three reference zones — with a single hallway point, sources near the ends often get mirrored across y = 0.
+
+## Python trilateration prototype
+
+Trilateration software (`localization.py`, `audio_processing.py`, `microphone.py`, `test_audio_localization.py`). Install with `pip install -r requirements.txt`.
