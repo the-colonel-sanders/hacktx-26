@@ -4,7 +4,7 @@ import s from "./home.module.css";
 
 const ROUTES: [string, string, string][] = [
   ["GET", "/api/time", "Server clock. Phones call it ~5× at check-in to compute their clock offset."],
-  ["POST", "/api/checkin", "{ deviceId?, roomId, lat?, lng?, clockOffsetMs } → { deviceId }"],
+  ["POST", "/api/checkin", "{ deviceId?, roomId OR x/y in meters, clockOffsetMs } → { deviceId, roomId }. With x/y, the room is the nearest one."],
   ["POST", "/api/calibrate", "{ deviceId, peakDb } from a reference clap → stores the mic gain offset"],
   ["POST", "/api/detection", "{ deviceId, localSpikeTsMs, peakDb, confidence, label } → { incidentId, estimate }"],
   ["POST", "/api/status", "{ deviceId, status: safe | need_help | injured }"],

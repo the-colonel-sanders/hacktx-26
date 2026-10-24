@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ROOMS } from "@/lib/floorplan";
 import type { TrailPoint } from "@/lib/incidents";
-import type { Heatmap } from "@/lib/localize";
+import { SHOT_WINDOW_MS, type Heatmap } from "@/lib/localize";
 import FloorMap from "./FloorMap";
 import s from "./incident.module.css";
 
@@ -11,6 +11,8 @@ export type Detection = {
   id: string;
   device_id: string;
   room_id: string;
+  x: number; // phone position when it heard the shot (resolved server-side)
+  y: number;
   spike_ts_ms: number;
   raw_peak_db: number;
   norm_peak_db: number;
@@ -29,6 +31,7 @@ export type IncidentView = {
   trail: TrailPoint[];
   detection_count: number;
   detections: Detection[];
+  devices: { id: string; room_id: string; x: number; y: number }[]; // recently active phones
 };
 
 const POLL_MS = 1000;
@@ -64,7 +67,13 @@ export default function IncidentPage() {
     refresh();
   };
 
-  const firstTs = incident?.detections.length ? Math.min(...incident.detections.map((d) => d.spike_ts_ms)) : 0;
+  // Group detections into shots (same rule as the server: within the shot window), newest shot first.
+  const shots: Detection[][] = [];
+  for (const d of [...(incident?.detections ?? [])].sort((a, b) => a.spike_ts_ms - b.spike_ts_ms)) {
+    const current = shots[shots.length - 1];
+    if (current && d.spike_ts_ms - current[0].spike_ts_ms <= SHOT_WINDOW_MS) current.push(d);
+    else shots.push([d]);
+  }
 
   return (
     <main className={s.page}>
@@ -116,24 +125,38 @@ export default function IncidentPage() {
                 <table className={s.table}>
                   <thead>
                     <tr>
-                      <th>Room</th>
-                      <th className={s.num}>Arrival (ms after first)</th>
+                      <th className={s.num}>Phone at (x, y m)</th>
+                      <th className={s.num}>Heard after first phone (ms)</th>
                       <th className={s.num}>Loudness (dB, normalized)</th>
                       <th className={s.num}>Confidence</th>
                       <th>Device</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {incident.detections.map((d) => (
-                      <tr key={d.id}>
-                        <td>{roomName(d.room_id)}</td>
-                        <td className={s.num}>{(d.spike_ts_ms - firstTs).toFixed(0)}</td>
-                        <td className={s.num}>{d.norm_peak_db.toFixed(1)}</td>
-                        <td className={s.num}>{d.confidence == null ? "—" : `${Math.round(d.confidence * 100)}%`}</td>
-                        <td className={s.mono}>{d.device_id.slice(0, 8)}</td>
-                      </tr>
+                  {shots
+                    .map((shot, i) => ({ shot, n: i + 1 }))
+                    .reverse()
+                    .map(({ shot, n }) => (
+                      <tbody key={shot[0].id}>
+                        <tr className={s.shotRow}>
+                          <th colSpan={5}>
+                            Shot {n} · {shot.length} phone{shot.length === 1 ? "" : "s"} ·{" "}
+                            {new Date(shot[0].spike_ts_ms).toLocaleTimeString()}
+                            {n === shots.length && " · latest"}
+                          </th>
+                        </tr>
+                        {shot.map((d) => (
+                          <tr key={d.id}>
+                            <td className={s.num} title={`Nearest room: ${roomName(d.room_id)}`}>
+                              ({d.x}, {d.y})
+                            </td>
+                            <td className={s.num}>+{(d.spike_ts_ms - shot[0].spike_ts_ms).toFixed(1)}</td>
+                            <td className={s.num}>{d.norm_peak_db.toFixed(1)}</td>
+                            <td className={s.num}>{d.confidence == null ? "—" : `${Math.round(d.confidence * 100)}%`}</td>
+                            <td className={s.mono}>{d.device_id.slice(0, 8)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
                     ))}
-                  </tbody>
                 </table>
               </div>
             )}

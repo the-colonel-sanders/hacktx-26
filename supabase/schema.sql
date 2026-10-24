@@ -65,6 +65,37 @@ create table if not exists statuses (
   updated_at timestamptz not null default now()
 );
 
+-- Exact phone position in meters (optional). When null, the room center is used.
+-- Detections keep the position they were heard from, so moving a phone later doesn't rewrite history.
+alter table devices    add column if not exists x float8, add column if not exists y float8;
+alter table detections add column if not exists x float8, add column if not exists y float8;
+
+-- Timing calibration: each phone's constant arrival-time bias (audio pipeline delay etc.),
+-- measured from a reference sound at a known spot and subtracted from every detection.
+alter table devices add column if not exists time_offset_ms float8 not null default 0;
+
+create table if not exists timing_calibrations (
+  id          uuid primary key default gen_random_uuid(),
+  x           float8 not null,  -- where the reference sound is made
+  y           float8 not null,
+  status      text not null default 'listening' check (status in ('listening', 'done', 'cancelled')),
+  started_at  timestamptz not null default now(),
+  finished_at timestamptz,
+  results     jsonb
+);
+create unique index if not exists timing_calibrations_one_active on timing_calibrations (status) where status = 'listening';
+
+create table if not exists timing_cal_reports (
+  calibration_id uuid not null references timing_calibrations(id) on delete cascade,
+  device_id      uuid not null references devices(id) on delete cascade,
+  x              float8 not null,  -- phone position when it heard the reference
+  y              float8 not null,
+  spike_ts_ms    float8 not null,  -- server clock, before this calibration's correction
+  peak_db        float8 not null,
+  created_at     timestamptz not null default now(),
+  primary key (calibration_id, device_id)
+);
+
 -- RLS: anon (publishable key) can only read rooms/incidents/alerts/statuses.
 -- All writes go through API routes using the secret key, which bypasses RLS.
 alter table rooms      enable row level security;
@@ -73,11 +104,15 @@ alter table incidents  enable row level security;
 alter table detections enable row level security;
 alter table alerts     enable row level security;
 alter table statuses   enable row level security;
+alter table timing_calibrations enable row level security;
+alter table timing_cal_reports  enable row level security;
 
 -- Explicit grants so this works with "Automatically expose new tables" turned off.
 revoke all on rooms, devices, incidents, detections, alerts, statuses from anon, authenticated;
 grant select on rooms, incidents, alerts, statuses to anon;
 grant all on rooms, devices, incidents, detections, alerts, statuses to service_role;
+revoke all on timing_calibrations, timing_cal_reports from anon, authenticated;
+grant all on timing_calibrations, timing_cal_reports to service_role;
 
 drop policy if exists anon_read on rooms;
 drop policy if exists anon_read on incidents;

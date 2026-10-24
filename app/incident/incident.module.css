@@ -229,3 +229,11 @@
   font-family: ui-monospace, Consolas, monospace;
   color: var(--ink-2);
 }
+
+.shotRow th {
+  padding: 12px 8px 6px;
+  border-bottom: 1px solid var(--axis);
+  color: var(--ink);
+  font-weight: 600;
+  text-align: left;
+}

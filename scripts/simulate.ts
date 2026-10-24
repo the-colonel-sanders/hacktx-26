@@ -1,10 +1,11 @@
 // Simulate phones hearing a gunshot and reporting it to the server.
 //
-//   npx tsx scripts/simulate.ts <x> <y> [baseUrl] [--shots 3] [--move 4] [--keep]
+//   npx tsx scripts/simulate.ts <x> <y> [baseUrl] [--shots 3] [--move 4] [--rooms 202,204] [--keep]
 //
 // Checks in one fake phone per room (each with a random clock skew and mic gain),
 // syncs clocks via /api/time, calibrates, then posts detections for each shot.
 // --move N moves the source N meters along +x between shots.
+// --rooms limits the fake phones to those room ids (default: every room).
 // Clears any active incident first unless --keep is passed.
 
 import { ROOMS } from "../lib/floorplan";
@@ -41,6 +42,7 @@ function parseArgs() {
     shots: Number(flags.shots ?? 1),
     move: Number(flags.move ?? 0),
     keep: flags.keep === true,
+    rooms: typeof flags.rooms === "string" ? flags.rooms.split(",").map((r) => r.trim()) : null,
   };
 }
 
@@ -73,13 +75,18 @@ async function syncClock(baseUrl: string, localNow: () => number): Promise<numbe
 }
 
 async function main() {
-  const { x, y, baseUrl, shots, move, keep } = parseArgs();
+  const { x, y, baseUrl, shots, move, keep, rooms } = parseArgs();
+  const unknown = rooms?.filter((id) => !ROOMS.some((r) => r.id === id)) ?? [];
+  if (unknown.length) {
+    console.error(`Unknown room(s): ${unknown.join(", ")}. Valid: ${ROOMS.map((r) => r.id).join(", ")}`);
+    process.exit(1);
+  }
 
   if (!keep) await post(baseUrl, "/api/all-clear");
 
   // Check in + calibrate one phone per room.
   const phones: FakePhone[] = await Promise.all(
-    ROOMS.map(async (room) => {
+    ROOMS.filter((r) => !rooms || rooms.includes(r.id)).map(async (room) => {
       const skewMs = jitter(3000); // phone clocks are off by up to ±3 s
       const gainDb = jitter(6); // mics differ by up to ±6 dB
       const clockOffsetMs = await syncClock(baseUrl, () => Date.now() + skewMs);

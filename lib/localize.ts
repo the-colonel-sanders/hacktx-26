@@ -3,14 +3,25 @@ import { FLOOR_BOUNDS, type Bounds } from "./floorplan";
 // Tunables
 export const W_LOUD = 1;
 export const W_ORDER = 10;
+export const W_TIME = 1;
 export const HEATMAP_T = 5;
+export const SPEED_OF_SOUND_MPS = 343;
+// Expected arrival-time error. Phones placed by room center can be several meters (≈10 ms) off.
+export const TIME_SIGMA_EXACT_MS = 3;
+export const TIME_SIGMA_ROOM_MS = 10;
 export const GRID_RESOLUTION_M = 0.5;
 export const MIN_DIST_M = 0.5;
 export const ORDER_MIN_GAP_MS = 15; // ignore arrival-order pairs closer than this
 export const SHOT_WINDOW_MS = 300; // detections within ±this belong to the same shot
 export const REFERENCE_DB = -10; // expected peak of the reference calibration clap
 
-export type Observation = { x: number; y: number; normPeakDb: number; spikeTsMs: number };
+export type Observation = {
+  x: number;
+  y: number;
+  normPeakDb: number;
+  spikeTsMs: number;
+  exact?: boolean; // true if x/y is the phone's real spot, not its room center
+};
 
 export type Heatmap = {
   width: number;
@@ -42,6 +53,26 @@ export function cellCost(cx: number, cy: number, obs: Observation[]): number {
     loudCost += r * r;
   }
 
+  // Arrival time: t_i = t0 + d_i / c, with the unknown fire time t0 fit as a weighted mean.
+  // Equivalent to matching every pair's time gap to its distance gap (a hyperbola per pair).
+  let wSum = 0;
+  let t0 = 0;
+  const w = new Array<number>(n);
+  const travelMs = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const sigma = obs[i].exact ? TIME_SIGMA_EXACT_MS : TIME_SIGMA_ROOM_MS;
+    w[i] = 1 / (sigma * sigma);
+    travelMs[i] = (dist[i] / SPEED_OF_SOUND_MPS) * 1000;
+    t0 += w[i] * (obs[i].spikeTsMs - travelMs[i]);
+    wSum += w[i];
+  }
+  t0 /= wSum;
+  let timeCost = 0;
+  for (let i = 0; i < n; i++) {
+    const r = obs[i].spikeTsMs - (t0 + travelMs[i]);
+    timeCost += w[i] * r * r;
+  }
+
   // Arrival order: whoever clearly heard it first should be closer.
   let orderViolations = 0;
   for (let i = 0; i < n; i++) {
@@ -50,7 +81,7 @@ export function cellCost(cx: number, cy: number, obs: Observation[]): number {
     }
   }
 
-  return W_LOUD * loudCost + W_ORDER * orderViolations;
+  return W_LOUD * loudCost + W_TIME * timeCost + W_ORDER * orderViolations;
 }
 
 export function gridSearch(
@@ -100,4 +131,22 @@ export function groupShot<D extends { deviceId: string; spikeTsMs: number; normP
     if (!prev || d.normPeakDb > prev.normPeakDb) byDevice.set(d.deviceId, d);
   }
   return [...byDevice.values()];
+}
+
+export type TimingReport = { deviceId: string; x: number; y: number; spikeTsMs: number };
+export type TimingBias = { deviceId: string; distanceM: number; biasMs: number };
+
+/**
+ * Timing calibration from one reference sound made at a known spot.
+ * Each phone should hear it at t0 + d_i / c. The fire time t0 is unknown, so only differences
+ * between phones are measurable: bias_i = (t_i − d_i/c) − mean over phones. Biases sum to zero,
+ * which is all localization needs (it only compares arrival times).
+ */
+export function timingBiases(src: { x: number; y: number }, reports: TimingReport[]): TimingBias[] {
+  const withDist = reports.map((r) => {
+    const distanceM = Math.hypot(r.x - src.x, r.y - src.y);
+    return { ...r, distanceM, emitted: r.spikeTsMs - (distanceM / SPEED_OF_SOUND_MPS) * 1000 };
+  });
+  const t0 = withDist.reduce((sum, r) => sum + r.emitted, 0) / withDist.length;
+  return withDist.map((r) => ({ deviceId: r.deviceId, distanceM: r.distanceM, biasMs: r.emitted - t0 }));
 }

@@ -19,17 +19,25 @@ export default function FloorMap({ incident }: { incident: IncidentView }) {
   const [hover, setHover] = useState<Hover | null>(null);
   const { heatmap, trail, best_x, best_y } = incident;
 
-  // Loudest detection per room for the most recent shot.
-  const latestShot = useMemo(() => {
+  // Every known phone, with its loudest reading for the most recent shot (if it heard it).
+  const phones = useMemo(() => {
     const last = trail[trail.length - 1];
-    const byRoom = new Map<string, number>();
-    if (!last) return byRoom;
+    const byId = new Map<string, { x: number; y: number; db: number | null }>();
+    for (const d of incident.devices ?? []) byId.set(d.id, { x: d.x, y: d.y, db: null });
     for (const d of incident.detections) {
-      if (Math.abs(d.spike_ts_ms - last.t) > SHOT_WINDOW_MS) continue;
-      byRoom.set(d.room_id, Math.max(byRoom.get(d.room_id) ?? -Infinity, d.norm_peak_db));
+      if (!last || Math.abs(d.spike_ts_ms - last.t) > SHOT_WINDOW_MS) continue;
+      const prev = byId.get(d.device_id);
+      // Position from the detection: where the phone was when it heard the shot.
+      byId.set(d.device_id, { x: d.x, y: d.y, db: Math.max(prev?.db ?? -Infinity, d.norm_peak_db) });
     }
-    return byRoom;
-  }, [incident.detections, trail]);
+    // A silent phone at the same spot as one that heard it is a stale check-in; hide it.
+    // Draw phones that heard it last so they're on top.
+    const all = [...byId.values()];
+    const heardAt = new Set(all.filter((p) => p.db != null).map((p) => `${p.x},${p.y}`));
+    return all
+      .filter((p) => p.db != null || !heardAt.has(`${p.x},${p.y}`))
+      .sort((a, b) => Number(a.db != null) - Number(b.db != null));
+  }, [incident.detections, incident.devices, trail]);
 
   const cells = useMemo(() => {
     if (!heatmap) return [];
@@ -51,11 +59,13 @@ export default function FloorMap({ incident }: { incident: IncidentView }) {
     const my = FLOOR_BOUNDS.minY + ((e.clientY - box.top) / box.height) * (H / PX);
     const lines = [`${mx.toFixed(1)}, ${my.toFixed(1)} m`];
 
+    const phone = phones.find((p) => Math.hypot(p.x - mx, p.y - my) < 0.6);
     const room = ROOMS.find((r) => Math.hypot(r.x - mx, r.y - my) < 1);
-    if (room) {
-      const db = latestShot.get(room.id);
+    if (phone) {
+      lines.unshift("Phone");
+      lines.push(phone.db == null ? "Didn't hear latest shot" : `Heard latest shot at ${phone.db.toFixed(1)} dB`);
+    } else if (room) {
       lines.unshift(room.name);
-      lines.push(db == null ? "Didn't hear latest shot" : `Heard latest shot at ${db.toFixed(1)} dB`);
     } else if (heatmap) {
       const col = Math.round((mx - heatmap.originX) / heatmap.resolution);
       const row = Math.round((my - heatmap.originY) / heatmap.resolution);
@@ -120,31 +130,34 @@ export default function FloorMap({ incident }: { incident: IncidentView }) {
             </g>
           ))}
 
-          {/* Phones (one per room center) */}
-          {ROOMS.map((r) => {
-            const db = latestShot.get(r.id);
-            const heard = db != null;
-            return (
-              <g key={r.id}>
-                <circle
-                  cx={sx(r.x)}
-                  cy={sy(r.y)}
-                  r={6}
-                  fill={heard ? "var(--ink)" : "var(--surface)"}
-                  stroke={heard ? "var(--surface)" : "var(--muted)"}
-                  strokeWidth={2}
-                />
-                <text x={sx(r.x)} y={sy(r.y) - 11} className={s.roomLabel}>
-                  {r.name.replace("Hallway ", "Hall ")}
+          {/* Room centers (reference) */}
+          {ROOMS.map((r) => (
+            <g key={r.id}>
+              <rect x={sx(r.x) - 4} y={sy(r.y) - 4} width={8} height={8} rx={1.5} fill="none" stroke="var(--axis)" strokeWidth={1.5} />
+              <text x={sx(r.x)} y={sy(r.y) - 10} className={s.roomLabel}>
+                {r.name.replace("Hallway ", "Hall ")}
+              </text>
+            </g>
+          ))}
+
+          {/* Phones at their actual positions */}
+          {phones.map((p, i) => (
+            <g key={i}>
+              <circle
+                cx={sx(p.x)}
+                cy={sy(p.y)}
+                r={6}
+                fill={p.db != null ? "var(--ink)" : "var(--surface)"}
+                stroke={p.db != null ? "var(--surface)" : "var(--muted)"}
+                strokeWidth={2}
+              />
+              {p.db != null && (
+                <text x={sx(p.x)} y={sy(p.y) + 19} className={s.dbLabel}>
+                  {p.db.toFixed(0)} dB
                 </text>
-                {heard && (
-                  <text x={sx(r.x)} y={sy(r.y) + 19} className={s.dbLabel}>
-                    {db.toFixed(0)} dB
-                  </text>
-                )}
-              </g>
-            );
-          })}
+              )}
+            </g>
+          ))}
 
           {/* Best estimate */}
           {best_x != null && best_y != null && (
@@ -168,6 +181,12 @@ export default function FloorMap({ incident }: { incident: IncidentView }) {
       <ul className={s.legend}>
         <li>
           <span className={s.gradient} aria-hidden /> Likelihood: low → high
+        </li>
+        <li>
+          <svg width="12" height="12" aria-hidden>
+            <rect x="2" y="2" width="8" height="8" rx="1.5" fill="none" stroke="var(--axis)" strokeWidth="1.5" />
+          </svg>
+          Room center
         </li>
         <li>
           <svg width="18" height="18" aria-hidden>

@@ -48,6 +48,20 @@ It checks in one fake phone per room (random clock skew ±3 s and mic gain ±6 d
 2. Add the three env vars under Project → Settings → Environment Variables.
 3. Deploy. Point phones at `https://<app>.vercel.app/api/...`.
 
+### 6. Real phones
+
+Open `/phone` on each phone (or scan a room's code from `/qr`), pick the room, and tap **Start listening**. Tap **Calibrate** and clap once about 1 m away.
+
+The mic only works over HTTPS, and phones can't reach `localhost`. Use one of these:
+- **Vercel deploy** (easiest), or
+- **A tunnel:** `ngrok http 3000`, then open the https URL on the phones, or
+- **Local HTTPS:** `npm run dev:https`, then open `https://<laptop-LAN-IP>:3000` and accept the certificate warning.
+
+Phone code lives in `app/phone/`:
+- `audio.ts` opens the mic and timestamps each spike at the moment it reached the mic.
+- `api.ts` handles clock sync, check-in (repeated every 3 min) and sending with retries.
+- `detector.ts` is a **placeholder** that accepts any sharp impulse, including claps. Replace `classify()` with your model.
+
 ## API
 
 All bodies are JSON; invalid input returns `400 { error }`.
@@ -55,7 +69,7 @@ All bodies are JSON; invalid input returns `400 { error }`.
 | Route | Body | Returns |
 |---|---|---|
 | `GET /api/time` | — | `{ serverTime }` |
-| `POST /api/checkin` | `{ deviceId?, roomId, lat?, lng?, clockOffsetMs }` | `{ deviceId }` |
+| `POST /api/checkin` | `{ deviceId?, roomId?, x?, y?, lat?, lng?, clockOffsetMs }`: send `roomId` or `x`/`y` in meters (room = nearest) | `{ deviceId, roomId, x, y }` |
 | `POST /api/calibrate` | `{ deviceId, peakDb }` | `{ deviceId, gainOffsetDb }` |
 | `POST /api/detection` | `{ deviceId, localSpikeTsMs, peakDb, confidence, label }` | `{ incidentId, estimate: { x, y, roomId, deviceCount } }` |
 | `POST /api/status` | `{ deviceId, status: "safe" \| "need_help" \| "injured" }` | `{ deviceId, roomId, status }` |
@@ -75,4 +89,4 @@ Known limit: phones only report their room center, and loudness/order can't tell
 
 ## Python trilateration prototype
 
-Trilateration software (`localization.py`, `audio_processing.py`, `microphone.py`, `test_audio_localization.py`). Install with `pip install -r requirements.txt`.
+Trilateration software in `sound_changes/src/` (`localization.py`, `audio_processing.py`, `microphone.py`, `test_audio_localization.py`), sample audio in `sound_changes/audio/`. Install with `pip install -r sound_changes/requirements.txt`.

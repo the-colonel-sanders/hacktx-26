@@ -28,3 +28,17 @@ export function nearestRoom<R extends { x: number; y: number }>(x: number, y: nu
   }
   return best;
 }
+
+export function inBounds(x: number, y: number): boolean {
+  return x >= FLOOR_BOUNDS.minX && x <= FLOOR_BOUNDS.maxX && y >= FLOOR_BOUNDS.minY && y <= FLOOR_BOUNDS.maxY;
+}
+
+/** A phone's position: its exact x/y if it set one, else its room center. */
+export function positionOf(
+  row: { x?: number | null; y?: number | null; room_id: string | null },
+  roomById: Map<string, { x: number; y: number }>,
+): { x: number; y: number } | null {
+  if (row.x != null && row.y != null) return { x: row.x, y: row.y };
+  const room = row.room_id ? roomById.get(row.room_id) : undefined;
+  return room ? { x: room.x, y: room.y } : null;
+}
