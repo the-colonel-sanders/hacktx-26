@@ -89,4 +89,4 @@ Known limit: phones only report their room center, and loudness/order can't tell
 
 ## Python trilateration prototype
 
-Trilateration software (`localization.py`, `audio_processing.py`, `microphone.py`, `test_audio_localization.py`). Install with `pip install -r requirements.txt`.
+Trilateration software in `sound_changes/src/` (`localization.py`, `audio_processing.py`, `microphone.py`, `test_audio_localization.py`), sample audio in `sound_changes/audio/`. Install with `pip install -r sound_changes/requirements.txt`.
