@@ -72,19 +72,81 @@ function contextToWallMs(context: AudioContext, ctxTime: number): number {
   return now() - (context.currentTime - ctxTime) * 1000;
 }
 
-/** Keep the screen on — the mic stops when the page is backgrounded (especially on iOS). */
-export async function keepAwake(): Promise<() => void> {
+/**
+ * "on": the browser's screen wake lock is held.
+ * "fallback": no wake lock API (iOS < 16.4); a muted inline video is playing, which keeps
+ *   some older browsers awake — best effort.
+ * "off": neither worked; the screen may sleep and the mic will stop.
+ */
+export type AwakeStatus = "on" | "fallback" | "off";
+
+const RECHECK_MS = 10_000;
+
+/**
+ * Keep the screen on while listening — when it sleeps, the browser stops the mic.
+ * The browser can drop the lock at any time (tab hidden, battery saver, a call), so it is
+ * re-requested when the page is visible again, on any tap, and every few seconds.
+ */
+export async function keepAwake(onStatus: (s: AwakeStatus) => void): Promise<() => void> {
   let lock: WakeLockSentinel | null = null;
-  const acquire = async () => {
+  let video: HTMLVideoElement | null = null;
+  let stopped = false;
+
+  const startFallbackVideo = async () => {
+    if (video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 2;
+    canvas.getContext("2d")?.fillRect(0, 0, 2, 2);
+    video = document.createElement("video");
+    Object.assign(video, { muted: true, loop: true, playsInline: true, srcObject: canvas.captureStream(1) });
+    video.setAttribute("playsinline", "");
+    video.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none";
+    document.body.appendChild(video);
     try {
-      lock = await navigator.wakeLock?.request("screen");
+      await video.play();
     } catch {}
   };
-  const onVisible = () => document.visibilityState === "visible" && acquire();
+
+  const acquire = async () => {
+    if (stopped || (lock && !lock.released)) return;
+    if (document.visibilityState !== "visible") return;
+    if ("wakeLock" in navigator) {
+      try {
+        lock = await navigator.wakeLock.request("screen");
+        lock.addEventListener("release", () => {
+          onStatus("off");
+          acquire(); // dropped by the system while visible: ask again
+        });
+        onStatus("on");
+        return;
+      } catch {
+        // Refused (battery saver, not visible yet, no user gesture); retried below.
+      }
+    } else {
+      await startFallbackVideo();
+      onStatus(video && !video.paused ? "fallback" : "off");
+      return;
+    }
+    onStatus("off");
+  };
+
+  const onVisible = () => {
+    if (document.visibilityState === "visible") acquire();
+  };
+  const onTap = () => acquire();
+
   await acquire();
   document.addEventListener("visibilitychange", onVisible);
+  document.addEventListener("pointerdown", onTap);
+  const timer = setInterval(acquire, RECHECK_MS);
+
   return () => {
+    stopped = true;
+    clearInterval(timer);
     document.removeEventListener("visibilitychange", onVisible);
+    document.removeEventListener("pointerdown", onTap);
     lock?.release();
+    video?.pause();
+    video?.remove();
   };
 }

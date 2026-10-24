@@ -357,3 +357,17 @@
   color: var(--ink);
   font-size: 14px;
 }
+
+.warnText {
+  color: var(--critical);
+  font-weight: 600;
+}
+
+.warnBox {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--critical);
+  color: var(--ink);
+  font-size: 13px;
+}
