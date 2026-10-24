@@ -1,0 +1,231 @@
+.page {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  display: grid;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.active {
+  background: var(--critical);
+  color: #fff;
+}
+
+.clear {
+  border: 1px solid var(--border);
+  color: var(--good-text);
+}
+
+.clear span {
+  color: var(--good);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.actions button {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.actions button:hover:not(:disabled) {
+  border-color: var(--axis);
+}
+
+.actions button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.error {
+  margin: 0;
+  color: var(--critical);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.stat,
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.stat {
+  padding: 12px 14px;
+}
+
+.statLabel {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.statValue {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  padding: 16px;
+  min-width: 0;
+}
+
+.h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.muted {
+  margin: 8px 0 0;
+  color: var(--ink-2);
+}
+
+.mapWrap {
+  position: relative;
+}
+
+.map {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.roomLabel,
+.dbLabel,
+.trailNum {
+  text-anchor: middle;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.roomLabel {
+  fill: var(--ink-2);
+  font-weight: 600;
+}
+
+.dbLabel {
+  fill: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.trailNum {
+  fill: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tooltip {
+  position: absolute;
+  transform: translate(12px, -50%);
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltipHead {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gradient {
+  width: 56px;
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(to right, transparent, var(--heat));
+  border: 1px solid var(--border);
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--axis);
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--grid);
+}
+
+.num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--ink-2);
+}
