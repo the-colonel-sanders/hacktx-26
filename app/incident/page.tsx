@@ -11,6 +11,8 @@ export type Detection = {
   id: string;
   device_id: string;
   room_id: string;
+  x: number; // phone position when it heard the shot (resolved server-side)
+  y: number;
   spike_ts_ms: number;
   raw_peak_db: number;
   norm_peak_db: number;
@@ -29,6 +31,7 @@ export type IncidentView = {
   trail: TrailPoint[];
   detection_count: number;
   detections: Detection[];
+  devices: { id: string; room_id: string; x: number; y: number }[]; // recently active phones
 };
 
 const POLL_MS = 1000;
@@ -116,7 +119,7 @@ export default function IncidentPage() {
                 <table className={s.table}>
                   <thead>
                     <tr>
-                      <th>Room</th>
+                      <th className={s.num}>Phone at (x, y m)</th>
                       <th className={s.num}>Arrival (ms after first)</th>
                       <th className={s.num}>Loudness (dB, normalized)</th>
                       <th className={s.num}>Confidence</th>
@@ -126,7 +129,9 @@ export default function IncidentPage() {
                   <tbody>
                     {incident.detections.map((d) => (
                       <tr key={d.id}>
-                        <td>{roomName(d.room_id)}</td>
+                        <td className={s.num} title={`Nearest room: ${roomName(d.room_id)}`}>
+                          ({d.x}, {d.y})
+                        </td>
                         <td className={s.num}>{(d.spike_ts_ms - firstTs).toFixed(0)}</td>
                         <td className={s.num}>{d.norm_peak_db.toFixed(1)}</td>
                         <td className={s.num}>{d.confidence == null ? "—" : `${Math.round(d.confidence * 100)}%`}</td>

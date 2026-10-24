@@ -62,16 +62,69 @@ describe("cellCost", () => {
       { x: 10, y: 0, normPeakDb: -20, spikeTsMs: 50 },
     ];
     expect(cellCost(4, 0, obs)).toBeLessThan(cellCost(6, 0, obs));
-    expect(cellCost(6, 0, obs) - cellCost(4, 0, obs)).toBeCloseTo(10, 0);
+    // One order violation (10) on top of the worse time fit.
+    expect(cellCost(6, 0, obs) - cellCost(4, 0, obs)).toBeGreaterThan(10);
   });
 
-  it("ignores pairs closer than 15 ms", () => {
+  it("doesn't count order for gaps under 15 ms", () => {
     const obs: Observation[] = [
       { x: 0, y: 0, normPeakDb: -20, spikeTsMs: 0 },
       { x: 10, y: 0, normPeakDb: -20, spikeTsMs: 10 },
     ];
-    expect(cellCost(6, 0, obs)).toBeCloseTo(cellCost(4, 0, obs), 6);
+    // Only the (small, loose room-center) time term differs; no order violation.
+    expect(cellCost(6, 0, obs) - cellCost(4, 0, obs)).toBeLessThan(2);
   });
+
+  it("scores the time gap: 1.9 m farther ≈ 5.5 ms later", () => {
+    // Source at x ≈ 4.05 between phones 10 m apart: d_B − d_A = 1.9 m. Loudness agrees (3.3 dB gap).
+    const obs: Observation[] = [
+      { x: 0, y: 0, normPeakDb: -20, spikeTsMs: 0, exact: true },
+      { x: 10, y: 0, normPeakDb: -23.3, spikeTsMs: 5.5, exact: true },
+    ];
+    expect(cellCost(4, 0, obs)).toBeLessThan(cellCost(5, 0, obs));
+    expect(cellCost(4, 0, obs)).toBeLessThan(cellCost(3, 0, obs));
+    // Same loudness, but the gap says B heard it first: that cell should now fit far worse.
+    const flipped = obs.map((o, i) => ({ ...o, spikeTsMs: i === 0 ? 5.5 : 0 }));
+    expect(cellCost(4, 0, flipped) - cellCost(4, 0, obs)).toBeGreaterThan(5);
+  });
+});
+
+describe("exact phone positions", () => {
+  const PHONES = [
+    { x: 5, y: 2 },
+    { x: 20, y: -1 },
+    { x: 12, y: 6 },
+    { x: 0, y: -3 },
+  ];
+  const shot = (phones: typeof PHONES, sx: number, sy: number, rand: () => number, dbNoise = 0, msNoise = 0) =>
+    phones.map((p) => {
+      const d = Math.max(0.5, Math.hypot(sx - p.x, sy - p.y));
+      return {
+        ...p,
+        exact: true,
+        normPeakDb: -5 - 20 * Math.log10(d) + (rand() * 2 - 1) * dbNoise,
+        spikeTsMs: (d / SPEED_OF_SOUND) * 1000 + (rand() * 2 - 1) * msNoise,
+      };
+    });
+
+  it("two phones: the time gap cuts the loudness circle down to the source or its mirror", () => {
+    // Mirror of (12, 3) across the line through the two phones.
+    const est = gridSearch(shot(PHONES.slice(0, 2), 12, 3, mulberry32(7)));
+    const err = Math.min(Math.hypot(est.x - 12, est.y - 3), Math.hypot(est.x - 11.07, est.y + 1.61));
+    expect(err).toBeLessThan(1);
+  });
+
+  for (const [sx, sy] of [
+    [12, 3],
+    [2, 5],
+    [25, -2],
+    [16, 1],
+  ] as const) {
+    it(`four phones with noise locate (${sx}, ${sy}) within 1.5 m`, () => {
+      const est = gridSearch(shot(PHONES, sx, sy, mulberry32(sx * 31 + sy), 2, 3));
+      expect(Math.hypot(est.x - sx, est.y - sy)).toBeLessThan(1.5);
+    });
+  }
 });
 
 describe("groupShot", () => {

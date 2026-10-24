@@ -65,6 +65,11 @@ create table if not exists statuses (
   updated_at timestamptz not null default now()
 );
 
+-- Exact phone position in meters (optional). When null, the room center is used.
+-- Detections keep the position they were heard from, so moving a phone later doesn't rewrite history.
+alter table devices    add column if not exists x float8, add column if not exists y float8;
+alter table detections add column if not exists x float8, add column if not exists y float8;
+
 -- RLS: anon (publishable key) can only read rooms/incidents/alerts/statuses.
 -- All writes go through API routes using the secret key, which bypasses RLS.
 alter table rooms      enable row level security;

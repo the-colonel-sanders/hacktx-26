@@ -1,0 +1,350 @@
+.page {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+  display: grid;
+  gap: 14px;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.select,
+.primary,
+.secondary {
+  font: inherit;
+  font-size: 16px; /* no iOS zoom */
+  min-height: 48px;
+  border-radius: 10px;
+  padding: 0 14px;
+}
+
+.select {
+  border: 1px solid var(--axis);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.primary {
+  border: none;
+  background: var(--heat);
+  color: #fff;
+  font-weight: 600;
+}
+
+.primary:disabled {
+  opacity: 0.5;
+}
+
+.secondary {
+  border: 1px solid var(--axis);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.hint {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.error {
+  margin: 0;
+  color: var(--critical);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.live {
+  color: var(--good-text);
+}
+
+.meterWrap {
+  display: grid;
+  gap: 4px;
+}
+
+.meter {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--grid);
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  background: var(--heat);
+  border-radius: 6px;
+  transition: width 80ms linear;
+}
+
+.meterNoise {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ink-2);
+}
+
+.meterText {
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  font-size: 13px;
+}
+
+.facts dt {
+  color: var(--ink-2);
+}
+
+.facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sent {
+  color: var(--good-text);
+}
+
+.muted {
+  color: var(--ink-2);
+}
+
+/* Alert screen */
+
+.alert {
+  min-height: calc(100vh - 49px);
+  background: var(--critical);
+  color: #fff;
+  padding: 24px 16px 40px;
+}
+
+.alertInner {
+  max-width: 520px;
+  margin: 0 auto;
+  display: grid;
+  gap: 14px;
+}
+
+.alertKicker {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.alertTitle {
+  margin: 0;
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.alertWhere {
+  margin: 0;
+  font-size: 18px;
+}
+
+.alertSteps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: 15px;
+}
+
+.statusBlock p {
+  margin: 0 0 8px;
+}
+
+.statusButtons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.statusBtn {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  min-height: 56px;
+  border-radius: 12px;
+  border: 2px solid #fff;
+  background: transparent;
+  color: #fff;
+}
+
+.statusOn {
+  background: #fff;
+  color: var(--critical);
+}
+
+.alert .sent {
+  color: #fff;
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.alertNote {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.banner {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--critical);
+  color: var(--critical);
+  font-size: 14px;
+}
+
+.toggle {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.toggle input {
+  width: 22px;
+  height: 22px;
+  margin: 2px 0 0;
+  accent-color: var(--critical);
+}
+
+.danger {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  min-height: 48px;
+  border-radius: 10px;
+  border: none;
+  background: var(--critical);
+  color: #fff;
+}
+
+.danger:active {
+  opacity: 0.85;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--grid);
+}
+
+.segmented button {
+  font: inherit;
+  min-height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.segmented .segOn {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.picker {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: crosshair;
+  touch-action: manipulation;
+}
+
+.pickerLabel {
+  text-anchor: middle;
+  font-size: 10px;
+  fill: var(--ink-2);
+  pointer-events: none;
+}
+
+.xy {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.xy label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.xy input {
+  font: inherit;
+  font-size: 16px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--axis);
+  background: var(--surface);
+  color: var(--ink);
+}

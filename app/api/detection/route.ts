@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { nearestRoom, type Room } from "@/lib/floorplan";
+import { nearestRoom, positionOf, type Room } from "@/lib/floorplan";
 import { fail, json, parseBody } from "@/lib/http";
 import { getOrCreateActiveIncident, type TrailPoint } from "@/lib/incidents";
 import { SHOT_WINDOW_MS, gridSearch, groupShot, type Heatmap } from "@/lib/localize";
@@ -37,6 +37,8 @@ export async function POST(req: Request) {
       incident_id: incident.id,
       device_id: deviceId,
       room_id: device.room_id,
+      x: device.x,
+      y: device.y,
       spike_ts_ms: spikeTsMs,
       raw_peak_db: peakDb,
       norm_peak_db: normPeakDb,
@@ -50,7 +52,7 @@ export async function POST(req: Request) {
       await Promise.all([
         db()
           .from("detections")
-          .select("device_id, room_id, spike_ts_ms, norm_peak_db")
+          .select("device_id, room_id, x, y, spike_ts_ms, norm_peak_db")
           .eq("incident_id", incident.id)
           .gte("spike_ts_ms", spikeTsMs - SHOT_WINDOW_MS)
           .lte("spike_ts_ms", spikeTsMs + SHOT_WINDOW_MS),
@@ -65,26 +67,25 @@ export async function POST(req: Request) {
     const shot = groupShot(
       nearby.map((d) => ({
         deviceId: d.device_id as string,
-        room: roomById.get(d.room_id)!,
+        pos: positionOf(d, roomById)!,
+        exact: d.x != null && d.y != null,
         spikeTsMs: d.spike_ts_ms as number,
         normPeakDb: d.norm_peak_db as number,
       })),
       spikeTsMs,
-    ).filter((d) => d.room);
+    ).filter((d) => d.pos);
 
     // 5. Localize.
     let x: number;
     let y: number;
     let heatmap: Heatmap | null = null;
     if (shot.length >= 2) {
-      const est = gridSearch(shot.map((d) => ({ x: d.room.x, y: d.room.y, normPeakDb: d.normPeakDb, spikeTsMs: d.spikeTsMs })));
+      const est = gridSearch(shot.map((d) => ({ ...d.pos, exact: d.exact, normPeakDb: d.normPeakDb, spikeTsMs: d.spikeTsMs })));
       x = est.x;
       y = est.y;
       heatmap = est.heatmap;
     } else {
-      const room = roomById.get(device.room_id)!;
-      x = room.x;
-      y = room.y;
+      ({ x, y } = positionOf(device, roomById)!);
     }
     const roomId = nearestRoom(x, y, rooms as Room[])?.id ?? null;
 
