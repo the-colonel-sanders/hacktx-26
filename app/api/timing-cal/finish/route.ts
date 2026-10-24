@@ -26,8 +26,12 @@ export async function POST() {
       return { deviceId: b.deviceId, x: r.x, y: r.y, distanceM: b.distanceM, biasMs: b.biasMs, offsetMs: prevOffset + b.biasMs };
     });
 
+    const calibratedAt = new Date().toISOString();
     for (const r of results) {
-      const { error: updErr } = await db().from("devices").update({ time_offset_ms: r.offsetMs }).eq("id", r.deviceId);
+      const { error: updErr } = await db()
+        .from("devices")
+        .update({ time_offset_ms: r.offsetMs, time_calibrated_at: calibratedAt })
+        .eq("id", r.deviceId);
       if (updErr) throw updErr;
     }
     const { data: done, error: doneErr } = await db()

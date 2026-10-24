@@ -13,6 +13,7 @@ const Body = z
     lat: z.number().min(-90).max(90).optional(),
     lng: z.number().min(-180).max(180).optional(),
     clockOffsetMs: z.number(),
+    clockRttMs: z.number().nonnegative().optional(),
   })
   .refine((b) => (b.x == null) === (b.y == null), { message: "Send both x and y, or neither" })
   .refine((b) => b.roomId != null || b.x != null, { message: "Send roomId or x/y" })
@@ -21,7 +22,7 @@ const Body = z
 export async function POST(req: Request) {
   const parsed = await parseBody(req, Body);
   if ("response" in parsed) return parsed.response;
-  const { deviceId, x, y, lat, lng, clockOffsetMs } = parsed.data;
+  const { deviceId, x, y, lat, lng, clockOffsetMs, clockRttMs } = parsed.data;
 
   try {
     const { data: rooms, error: roomErr } = await db().from("rooms").select("id, name, x, y");
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
         lat: lat ?? null,
         lng: lng ?? null,
         clock_offset_ms: clockOffsetMs,
+        clock_rtt_ms: clockRttMs ?? null,
         last_seen: new Date().toISOString(),
       })
       .select("id")

@@ -83,7 +83,7 @@ All bodies are JSON; invalid input returns `400 { error }`.
 
 ## Localization
 
-`lib/localize.ts` — pure functions, tunables exported at the top (`W_LOUD`, `W_ORDER`, `HEATMAP_T`, `SHOT_WINDOW_MS`, ...). For every 0.5 m cell, cost = loudness-model residuals (inverse-square falloff with fitted source level) + 10 × arrival-order violations; the best cell is the estimate.
+`lib/localize.ts` — pure functions, tunables exported at the top (`LOUD_SIGMA_DB`, `TIME_SIGMA_*`, `CLIP_DB`, `SHOT_WINDOW_MS`, ...). For every 0.5 m cell, cost = χ² of the loudness model (inverse-square falloff with fitted source level, σ = 4 dB; clipped peaks count only as lower bounds) + χ² of arrival times (fitted fire time; each detection's σ from timing calibration, clock-sync round trip and position accuracy). The best cell is the estimate; the heatmap is exp(−Δχ²/2), the likelihood relative to that cell, so the ≥ 0.1 region is roughly a 90% confidence area.
 
 Known limit: phones only report their room center, and loudness/order can't tell which side of a line of phones a sound came from. That's why the hallway has three reference zones — with a single hallway point, sources near the ends often get mirrored across y = 0.
 
