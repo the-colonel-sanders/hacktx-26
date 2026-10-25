@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { ROOMS } from "@/lib/floorplan";
 import s from "./home.module.css";
+import { useState } from "react";
+import NearbyBuildingsPanel from "@/app/components/NearbyBuildingsPanel";
+import { useNearbyBuildings } from "@/app/hooks/useNearbyBuildings";
+import type { GunshotEvent } from "@/app/types/nearby";
 
 const ROUTES: [string, string, string][] = [
   ["GET", "/api/time", "Server clock. Phones call it ~5× at check-in to compute their clock offset."],
@@ -14,6 +18,10 @@ const ROUTES: [string, string, string][] = [
 ];
 
 export default function Home() {
+
+  const [latestGunshot, setLatestGunshot] = useState<GunshotEvent | null>(null);
+  const { data, loading, error } = useNearbyBuildings(latestGunshot);
+
   return (
     <main className={s.page}>
       <section>
@@ -119,6 +127,13 @@ export default function Home() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className={s.card}>
+        {/* new */}
+        <div className="w-96 border-l">
+          <NearbyBuildingsPanel data={data} loading={loading} error={error} />
+        </div>
       </section>
     </main>
   );
