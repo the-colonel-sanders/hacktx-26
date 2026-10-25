@@ -6,11 +6,25 @@ export type Spike = { localSpikeTsMs: number; peakDb: number; samples: Float32Ar
 export type Listener = { stop: () => void; context: AudioContext };
 
 /**
+ * How a spike's audio-clock time is converted to the wall clock (see contextToWallMs):
+ * - "output": getOutputTimestamp()'s matched pair minus the browser's render-ahead estimate. No jitter,
+ *   but a constant offset per audio session if that estimate is off; timing calibration removes it.
+ * - "current": context.currentTime read against now(). No estimate involved, but each reading is off by
+ *   up to one device buffer (~10 ms), which calibration can't remove.
+ */
+export type TimingMethod = "output" | "current";
+
+/**
  * Opens the mic with all browser processing off (AGC would flatten the loudness we
  * need to compare across phones) and runs the spike-detector worklet on it.
  * Must be called from a user gesture (tap) so the AudioContext may start.
+ * `timingMethod` is read at each spike, so it can be switched while listening.
  */
-export async function startListening(onSpike: (s: Spike) => void, onLevel: (l: Level) => void): Promise<Listener> {
+export async function startListening(
+  onSpike: (s: Spike) => void,
+  onLevel: (l: Level) => void,
+  timingMethod: () => TimingMethod = () => "output",
+): Promise<Listener> {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
   });
@@ -32,7 +46,7 @@ export async function startListening(onSpike: (s: Spike) => void, onLevel: (l: L
     else if (msg.type === "spike") {
       // Convert the onset's AudioContext time to our wall clock *right now*, before any ML runs.
       onSpike({
-        localSpikeTsMs: contextToWallMs(context, msg.onsetTime) - inputLatencyMs,
+        localSpikeTsMs: contextToWallMs(context, msg.onsetTime, timingMethod()) - inputLatencyMs,
         peakDb: msg.peakDb,
         samples: msg.samples,
         sampleRate: msg.sampleRate,
@@ -60,15 +74,16 @@ export async function startListening(onSpike: (s: Spike) => void, onLevel: (l: L
  * device buffers (~10 ms on Windows), so the pair is off by however far into the buffer we read.
  * getOutputTimestamp() returns a matched pair (context time, performance time) for the moment a
  * frame reaches the speaker; frames are rendered `baseLatency + outputLatency` before that, and
- * an input frame is processed as it is rendered.
+ * an input frame is processed as it is rendered. That removes the jitter but trusts the browser's
+ * latency estimate (see TimingMethod).
  */
-function contextToWallMs(context: AudioContext, ctxTime: number): number {
-  const ts = context.getOutputTimestamp?.();
+function contextToWallMs(context: AudioContext, ctxTime: number, method: TimingMethod): number {
+  const ts = method === "output" ? context.getOutputTimestamp?.() : undefined;
   if (ts?.contextTime && ts.performanceTime) {
     const renderAheadMs = ((context.baseLatency ?? 0) + (context.outputLatency ?? 0)) * 1000;
     return performance.timeOrigin + ts.performanceTime + (ctxTime - ts.contextTime) * 1000 - renderAheadMs;
   }
-  // Older browsers: fall back to the jittery pair.
+  // "current", or older browsers without getOutputTimestamp: the jittery pair.
   return now() - (context.currentTime - ctxTime) * 1000;
 }
 

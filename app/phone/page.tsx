@@ -18,7 +18,7 @@ import {
   type PhoneLocation,
   type Sync,
 } from "./api";
-import { keepAwake, startListening, type AwakeStatus, type Level, type Spike } from "./audio";
+import { keepAwake, startListening, type AwakeStatus, type Level, type Spike, type TimingMethod } from "./audio";
 import { MIN_CONFIDENCE, classify } from "./detector";
 import type { GeoSpot } from "./GeoPicker";
 import { useGpsFix } from "./gps";
@@ -36,6 +36,19 @@ const POLL_MS = 10_000; // fallback in case Realtime drops
 const LOCATION_KEY = "gunshot.location";
 const TEST_WINDOW_MS = 10_000; // simulated shots in the same window (server clock) are one shot
 const LOCKDOWN_KEY = "gunshot.lockdownScreen";
+const TIMING_METHOD_KEY = "gunshot.timingMethod";
+const TIMING_METHODS: [TimingMethod, string, string][] = [
+  [
+    "output",
+    "Output timestamp",
+    "No jitter, but can be off by a constant amount (the browser's latency estimate) until timing calibration removes it. Best with calibration.",
+  ],
+  [
+    "current",
+    "Current time",
+    "No latency estimate involved, but each reading can be off by up to ~10 ms, and calibration can't remove that.",
+  ],
+];
 
 type Status = "safe" | "need_help" | "injured";
 type ActiveIncident = { id: string; best_room_id: string | null; best_label: string | null } | null;
@@ -97,6 +110,9 @@ export default function PhonePage() {
   // While a timing calibration runs, sounds go to it instead of being reported as shots.
   const [timingCal, setTimingCal] = useState<ActiveTimingCal>(null);
   const timingCalRef = useRef<ActiveTimingCal>(null);
+  // How spike times are converted to the wall clock; read at each spike, so it can change while listening.
+  const [timingMethod, setTimingMethod] = useState<TimingMethod>("output");
+  const timingMethodRef = useRef<TimingMethod>("output");
   const cleanups = useRef<(() => void)[]>([]);
 
   const addLog = (text: string, tone?: LogEntry["tone"]) =>
@@ -128,6 +144,10 @@ export default function PhonePage() {
     }
     try {
       setLockdownScreen(localStorage.getItem(LOCKDOWN_KEY) === "on");
+      if (localStorage.getItem(TIMING_METHOD_KEY) === "current") {
+        timingMethodRef.current = "current";
+        setTimingMethod("current");
+      }
     } catch {}
   }, []);
 
@@ -136,6 +156,16 @@ export default function PhonePage() {
     try {
       localStorage.setItem(LOCKDOWN_KEY, on ? "on" : "off");
     } catch {}
+  };
+
+  const chooseTimingMethod = (m: TimingMethod) => {
+    if (m === timingMethodRef.current) return;
+    timingMethodRef.current = m;
+    setTimingMethod(m);
+    try {
+      localStorage.setItem(TIMING_METHOD_KEY, m);
+    } catch {}
+    addLog(`Timing method: ${TIMING_METHODS.find(([v]) => v === m)![1]}. Run timing calibration again.`);
   };
 
   // Watch for alerts from page load, even before the mic is started.
@@ -266,7 +296,7 @@ export default function PhonePage() {
         localStorage.setItem(LOCATION_KEY, JSON.stringify(location));
       } catch {}
       // Mic first: it needs the tap's user activation, which awaiting the network could use up.
-      const listener = await startListening(onSpike, setLevel);
+      const listener = await startListening(onSpike, setLevel, () => timingMethodRef.current);
       cleanups.current.push(listener.stop);
       cleanups.current.push(await keepAwake(setAwake));
 
@@ -575,6 +605,27 @@ export default function PhonePage() {
             <button className={s.danger} onClick={simulateShot} disabled={!sync}>
               Simulate shot
             </button>
+          </section>
+
+          <section className={s.card}>
+            <h2 className={s.h2}>Timing method</h2>
+            <div className={s.segmented} role="tablist" aria-label="Timing method">
+              {TIMING_METHODS.map(([value, name]) => (
+                <button
+                  key={value}
+                  role="tab"
+                  aria-selected={timingMethod === value}
+                  className={timingMethod === value ? s.segOn : ""}
+                  onClick={() => chooseTimingMethod(value)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <p className={s.hint}>
+              {TIMING_METHODS.find(([v]) => v === timingMethod)![2]} Switching changes this phone&apos;s timing, so run
+              timing calibration again afterwards.
+            </p>
           </section>
 
           <section className={s.card}>
