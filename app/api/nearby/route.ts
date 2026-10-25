@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchNearbyBuildings } from "@/lib/serpapi";
 import { cacheKey, getCached, setCached } from "@/lib/nearbyCache";
-
+// Gets positioning data
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const lat = parseFloat(sp.get("lat") ?? "");
