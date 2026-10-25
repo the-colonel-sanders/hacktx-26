@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import { Instrument_Serif, Geist, Geist_Mono } from "next/font/google";
+import { Instrument_Serif, Geist, Geist_Mono, Anton } from "next/font/google";
 import AppNav from "./components/AppNav";
 import "./globals.css";
 
 const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal", "italic"], variable: "--font-serif" });
 const sans = Geist({ subsets: ["latin"], variable: "--font-sans" });
 const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
+const display = Anton({ subsets: ["latin"], weight: "400", variable: "--font-display" });
 
 export const metadata: Metadata = {
   title: "Belugo: phones that hear where it happened",
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${serif.variable} ${sans.variable} ${mono.variable}`}>
+    <html lang="en" className={`${serif.variable} ${sans.variable} ${mono.variable} ${display.variable}`}>
       <body>
         <AppNav />
         {children}

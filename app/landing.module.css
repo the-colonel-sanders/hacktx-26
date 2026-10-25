@@ -178,11 +178,17 @@
 
 .headline {
   margin: clamp(28px, 5vw, 56px) 0 0;
-  font-family: var(--serif);
+  font-family: var(--font-display), Impact, "Arial Narrow Bold", sans-serif;
   font-weight: 400;
-  font-size: clamp(64px, 13.5vw, 212px);
-  line-height: 0.86;
-  letter-spacing: -0.035em;
+  font-size: clamp(64px, 14vw, 224px);
+  line-height: 0.92;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+/* Anton has one weight and no italic, so the accent line is set apart by color alone. */
+.headline em {
+  font-style: normal;
 }
 
 .heroBody {
@@ -626,11 +632,16 @@
 .sectionTitle,
 .judgesTitle {
   margin: 0;
-  font-family: var(--serif);
+  font-family: var(--font-display), Impact, "Arial Narrow Bold", sans-serif;
   font-weight: 400;
-  font-size: clamp(44px, 6.5vw, 96px);
+  font-size: clamp(52px, 8vw, 120px);
   line-height: 0.95;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+.sectionTitle em {
+  font-style: normal;
 }
 
 /* ---------- method ledger ---------- */
@@ -773,6 +784,7 @@
 }
 
 .judgesTitle em {
+  font-style: normal;
   color: #fff;
   opacity: 0.8;
 }
