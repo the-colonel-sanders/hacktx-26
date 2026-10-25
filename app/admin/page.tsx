@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Phones from "./Phones";
 import s from "./admin.module.css";
 
-export const metadata: Metadata = { title: "Admin · Gunshot Locator" };
+export const metadata: Metadata = { title: "Admin · Belugo" };
 
 export default function AdminPage() {
   return (

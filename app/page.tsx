@@ -1,329 +1,214 @@
-"use client";
 import Link from "next/link";
-import { ROOMS } from "@/lib/floorplan";
-import s from "./home.module.css";
-import { useState, useEffect } from "react";
-import NearbyBuildingsPanel from "@/app/components/NearbyBuildingsPanel";
-import { useNearbyBuildings } from "@/app/hooks/useNearbyBuildings";
-import type { GunshotEvent } from "@/app/types/nearby";
+import Logo from "./components/Logo";
+import Sonar from "./components/Sonar";
+import s from "./landing.module.css";
 
-const PAGES: { href: string; title: string; desc: string; external?: boolean }[] = [
-  { href: "/spaces", title: "Try demo", desc: "Start your own private demo and get a QR code to add phones." },
-  { href: "/phone", title: "Phone listener", desc: "Open this on each phone (or browser tab) that should listen." },
-  { href: "/admin", title: "Admin", desc: "Manage the phones: where they are, test buttons, alerts and calibration." },
-  { href: "/calibrate", title: "Timing calibration", desc: "Measure each phone's audio delay with one sound at a known spot (optional)." },
+const STEPS = [
+  {
+    n: "01",
+    title: "Listen on the phone",
+    text: "Each participating phone opens a web page and presses Start listening. An AudioWorklet watches the microphone for a sudden, sharp spike, and the audio is analyzed on the phone itself.",
+    note: "Web Audio · AudioWorklet",
+  },
+  {
+    n: "02",
+    title: "Report a timestamp, not a recording",
+    text: "When a phone hears a bang it sends four facts: who it is, when it heard it, how loud it was and how sure it is. The clock is synced to the server every minute, so timestamps from different phones line up.",
+    note: "{ deviceId, localSpikeTsMs, peakDb, confidence }",
+  },
+  {
+    n: "03",
+    title: "Solve for the origin",
+    text: "Sound covers about a meter every 2.9 ms and gets 6 dB quieter each time the distance doubles. The server scores every cell of the floor plan by how well it explains each phone's arrival time and loudness, and keeps the best fit.",
+    note: "grid search · lib/localize.ts",
+  },
+  {
+    n: "04",
+    title: "Tell the whole building",
+    text: "Within seconds the incident dashboard shows the estimated room, and every listening phone gets the alert. People can answer with one tap: safe, need help or injured, so responders know where to go first.",
+    note: "Supabase Realtime",
+  },
 ];
 
-const ROUTES: [string, string, string][] = [
-  ["POST", "/api/spaces", "{ name? }: start a demo space and switch this browser into it → { id, code, name }"],
-  ["GET", "/api/spaces/current", "The demo space this request is in (cookie from /join/CODE, ?space=CODE or an x-space header; otherwise the shared space)"],
-  ["POST", "/api/spaces/leave", "Go back to the shared demo space"],
-  ["GET", "/api/time", "Server clock. Phones sample it 12× (after a warm-up request) and keep the fastest round trip to compute their clock offset."],
-  ["POST", "/api/checkin", "{ deviceId?, roomId OR x/y in meters OR lat/lng + accuracyM (+ label), clockOffsetMs, clockRttMs? } → { deviceId, frame, roomId }. With x/y, the room is the nearest one."],
-  ["POST", "/api/calibrate", "{ deviceId, peakDb } from a reference clap → stores the mic gain offset"],
-  ["POST", "/api/detection", "{ deviceId, localSpikeTsMs, peakDb, confidence, label } → { incidentId, estimate: { x, y, lat, lng, roomId, label, deviceCount } }"],
-  ["POST", "/api/status", "{ deviceId, status: safe | need_help | injured }"],
-  ["POST", "/api/alert", "Raise a manual alert (creates an incident if none is active)"],
-  ["POST", "/api/all-clear", "Clear the active incident"],
-  ["GET", "/api/incidents/current", "Active incident with heatmap, trail, detections, status reports and recently active phones, or null (dashboard)"],
-  ["GET", "/api/incidents/summary", "Just the active incident's id, status and estimated place, or null (what phones poll)"],
-  ["GET", "/api/phones", "Recently active phones with where each is checked in and its settings (admin panel)"],
-  ["GET", "/api/phones/settings", "?deviceId= → the settings a phone should follow (phones poll this)"],
-  ["POST", "/api/phones/settings", "{ target: deviceId | \"all\", patch }: change phone settings from the admin panel"],
-  ["POST", "/api/phones/calibrate-mic", "{ deviceId }: ask a phone to calibrate its mic on the next clap"],
-  ["GET", "/api/timing-cal", "Running timing calibration (with phones that have reported) and the last finished one"],
-  ["POST", "/api/timing-cal/start", "{ x, y } or { lat, lng }: where the reference sound will be made"],
-  ["POST", "/api/timing-cal/report", "{ deviceId, localSpikeTsMs, peakDb }: a phone heard the reference (loudest kept)"],
-  ["POST", "/api/timing-cal/finish", "Compute each phone's delay and apply it to future detections"],
-  ["POST", "/api/timing-cal/cancel", "Stop a running calibration"],
-  ["GET", "/api/nearby", "?lat&lng&q: nearby buildings for the real-map view (needs SERPAPI_KEY)"],
+const FIGURES = [
+  { value: "343", unit: "m/s", text: "The speed of sound, the constant everything is solved against." },
+  { value: "±300", unit: "ms", text: "The window that groups separate phones' reports into a single shot." },
+  { value: "3+", unit: "phones", text: "Enough to settle the location: two phones leave a mirror-image ambiguity." },
+  { value: "0", unit: "bytes", text: "Of audio ever leaves the phone. No recordings, no voices, just three numbers." },
 ];
 
-export default function Home() {
-
-  const [latestGunshot, setLatestGunshot] = useState<GunshotEvent | null>({ id: "t1", lat: 30.2672, lng: -97.7431, timestamp: "" })
-  useEffect(() => {
-    const tick = async () => {
-      try {
-        const r = await fetch("/api/incidents/current");
-        if (!r.ok) return;
-        const inc = await r.json();
-        const est = inc?.estimate; // verify this path, see below
-        if (!est || typeof est.lat !== "number" || typeof est.lng !== "number") {
-          setLatestGunshot(null);
-          return;
-        }
-        const id = String(inc.id ?? inc.incidentId ?? `${est.lat},${est.lng}`);
-        setLatestGunshot(prev =>
-          prev?.id === id && prev.lat === est.lat && prev.lng === est.lng
-            ? prev
-            : { id, lat: est.lat, lng: est.lng, timestamp: new Date().toISOString() }
-        );
-      } catch {}
-    };
-    tick();
-    const t = setInterval(tick, 3000);
-    return () => clearInterval(t);
-  }, []);
-  const { data, loading, error } = useNearbyBuildings(latestGunshot);
-
+export default function Landing() {
   return (
-    <main className={s.page}>
-      <section>
-        <h1 className={s.title}>Gunshot Locator</h1>
-        <p className={s.lead}>
-          Ordinary phones in classrooms listen for a gunshot. When several of them hear one, the system works out
-          where it came from, from <b>how loud</b> it was and <b>how soon</b> each phone heard it, and alerts
-          everyone in the building within seconds.
-        </p>
-        <div className={s.ctaRow}>
-          <Link href="/spaces" className={s.cta}>
-            Try the demo →
+    <div className={s.root}>
+      <header className={s.header}>
+        <Link href="/" className={s.wordmark} aria-label="Belugo home">
+          <Logo size={26} />
+          belugo
+        </Link>
+        <nav className={s.headerNav} aria-label="Sections">
+          <a href="#method">Method</a>
+          <Link href="/docs">Docs</Link>
+          <Link href="/spaces" className={s.headerCta}>
+            Live demo
           </Link>
-        </div>
-        <p className={s.note}>
-          A hackathon prototype (HackTX 2026), not a validated gunshot detector or emergency system. Please test with
-          claps or the <b>Simulate shot</b> button only.
-        </p>
-      </section>
+        </nav>
+      </header>
 
-      <section className={s.card}>
-        <h2>How it works</h2>
-        <ol className={s.flow}>
-          <li>
-            <b>Phones listen.</b> Each phone runs a web page that listens to its microphone. The audio is analyzed on
-            the phone itself and never leaves it.
-          </li>
-          <li>
-            <b>They report a bang.</b> When a phone hears a sudden, sharp sound, it sends only <i>when</i> it heard it
-            and <i>how loud</i> it was.
-          </li>
-          <li>
-            <b>The server compares.</b> Sound travels about 1 m every 3 ms and gets quieter with distance, so phones
-            closer to the shot hear it sooner and louder. The server finds the spot that best explains every
-            phone&apos;s report.
-          </li>
-          <li>
-            <b>Everyone is alerted.</b> The dashboard shows the estimated location, and every listening phone gets the
-            alert and can report &quot;I&apos;m safe&quot;, &quot;Need help&quot; or &quot;Injured&quot;.
-          </li>
-        </ol>
-      </section>
+      <main>
+        <section className={s.hero}>
+          <div className={s.kicker} role="marquee" aria-label="HackTX 2026, Save Lives, Prototype at belugo.tech">
+            {/* Two identical halves: the track slides left by one half, then loops seamlessly. */}
+            <div className={s.tickerTrack} aria-hidden="true">
+              {Array.from({ length: 2 }, (_, half) => (
+                <div key={half} className={s.tickerHalf}>
+                  {Array.from({ length: 4 }, (_, i) => (
+                    <span key={i} className={s.tickerGroup}>
+                      <span>HackTX 2026</span>
+                      <span>Save Lives</span>
+                      <span className={s.live}>
+                        <i /> Prototype @ belugo.tech
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
 
-      <section className={s.card}>
-        <h2>Try it in 2 minutes, on this computer</h2>
-        <p className={s.muted}>
-          Each browser tab can act as a separate phone. Put three &quot;phones&quot; in three rooms and fire a pretend
-          shot that they all hear equally loud, at the same moment. The only place that fits is the spot equally far
-          from all three, so the system should find the middle.
-        </p>
-        <ol className={s.steps}>
-          <li>
-            Open <Link href="/phone" target="_blank">a phone tab</Link>, choose <b>Room 202</b> and press{" "}
-            <b>Start listening</b> (allow the microphone).
-          </li>
-          <li>
-            Do the same in two more tabs: one at <b>Room 204</b>, one at <b>Hallway Center</b>.
-          </li>
-          <li>
-            Open the <Link href="/incident" target="_blank">dashboard</Link> in another tab.
-          </li>
-          <li>
-            Press <b>Simulate shot</b> in all three phone tabs, within the same 10 seconds (each tab counts down).
-          </li>
-          <li>
-            The dashboard turns <b>Active</b> and marks the shot in <b>Room 203</b>, in the middle of the three phones.
-            Press <b>All clear</b> to reset.
-          </li>
-        </ol>
-        <p className={s.muted}>
-          Sharing this site with other people? Press <Link href="/spaces">Try demo</Link> first and create your own
-          space, so their tests don&apos;t mix with yours.
-        </p>
-      </section>
+          <h1 className={s.headline}>
+            Locate gunfire
+            <br />
+            <em>in seconds.</em>
+          </h1>
 
-      <section className={s.card}>
-        <h2>Try it with your phone</h2>
-        <ol className={s.steps}>
-          <li>
-            On this computer, open <Link href="/spaces">Try demo</Link> and create a space. It shows a QR code.
-          </li>
-          <li>
-            Scan it with your phone&apos;s camera, choose a room and press <b>Start listening</b>. Keep the screen on:
-            phones stop listening when the screen sleeps.
-          </li>
-          <li>
-            Open the <Link href="/incident">dashboard</Link> here, then clap once, sharply, about 1 m from the phone.
-          </li>
-        </ol>
-        <p className={s.muted}>
-          Phones only allow the microphone on secure (<code>https://</code>) sites. If you&apos;re running this on your
-          own laptop, <b>DEMO.md</b> in the project&apos;s repository shows how to make it reachable from a phone.
-        </p>
-      </section>
+          <div className={s.heroBody}>
+            <p className={s.lead}>
+              Belugo unites the phones already present in a school&apos;s classrooms into a single acoustic sensor
+              network. The moment a gunshot rings out, it triangulates the likely origin by comparing{" "}
+              <b>when</b> and <b>how loudly</b> each device heard it, assisting first responders in locating and neutralizing the threat.
+            </p>
+            <div className={s.heroActions}>
+              <Link href="/spaces" className={s.primaryBtn}>
+                Run the live demo <span aria-hidden="true">→</span>
+              </Link>
+              <a href="#method" className={s.textLink}>
+                How it works
+              </a>
+            </div>
+          </div>
 
-      <section className={s.card}>
-        <h2>Reading the dashboard</h2>
-        <dl className={s.defs}>
-          <dt>Blue shading</dt>
-          <dd>
-            Where the shot could have come from: the darker, the better that spot explains what the phones heard. A
-            large shaded area means the phones couldn&apos;t narrow it down.
-          </dd>
-          <dt>Red ringed dot</dt>
-          <dd>The best estimate for the latest shot, with the nearest room named above the map.</dd>
-          <dt>Numbered dashed line</dt>
-          <dd>Earlier shots in order, so you can see if a shooter is moving.</dd>
-          <dt>Solid / hollow dots</dt>
-          <dd>Phones that heard the latest shot (with how loud) / phones that are listening but didn&apos;t.</dd>
-          <dt>Status reports</dt>
-          <dd>People on the phones reporting safe, need help or injured, and where they are.</dd>
-          <dt>Detections table</dt>
-          <dd>Every phone&apos;s report, grouped by shot: how long after the first phone it heard it, and how loud.</dd>
-        </dl>
-      </section>
+          <Sonar />
+        </section>
 
-      <section className={s.card}>
-        <h2>Privacy and limits</h2>
-        <ul className={s.bullets}>
-          <li>
-            <b>No recordings leave the phone.</b> Only the time, loudness and a confidence score of a detected sound are
-            sent. Phones listen only after someone presses <b>Start listening</b>.
-          </li>
-          <li>
-            <b>The detector is a placeholder.</b> It accepts any short, sharp sound, which is why a clap works for the
-            demo. A real deployment needs a trained gunshot classifier.
-          </li>
-          <li>
-            <b>The location is an estimate.</b> It depends on knowing where each phone is, on how many phones heard the
-            shot, and on echoes. Three or more phones around the area give the best results.
-          </li>
-          <li>
-            <b>Not for real emergencies.</b> Use it to evaluate the idea, not to make safety decisions.
-          </li>
-        </ul>
-      </section>
-
-      <nav className={s.links} aria-label="Pages">
-        {PAGES.map((p) =>
-          p.external ? (
-            <a key={p.href} href={p.href} target="_blank" rel="noreferrer" className={s.linkCard}>
-              <span className={s.linkTitle}>{p.title} ↗</span>
-              <span className={s.linkDesc}>{p.desc}</span>
-            </a>
-          ) : (
-            <Link key={p.href} href={p.href} className={s.linkCard}>
-              <span className={s.linkTitle}>{p.title} →</span>
-              <span className={s.linkDesc}>{p.desc}</span>
-            </Link>
-          ),
-        )}
-      </nav>
-
-      <section className={s.card}>
-        <h2>Nearby buildings</h2>
-        <p className={s.muted}>Buildings around the latest estimate, when phones are on the real map.</p>
-        <div className="w-96 border-l">
-          <NearbyBuildingsPanel data={data} loading={loading} error={error} />
-        </div>
-      </section>
-
-      <details className={s.details}>
-        <summary>For developers</summary>
-
-        <section className={s.devBlock}>
-          <h2>Simulate without any phones</h2>
-          <p className={s.muted}>With the dev server running, fake phones in every room report a shot at (9, 2) m:</p>
-          <pre>npx tsx scripts/simulate.ts 9 2</pre>
-          <p className={s.muted}>
-            A shooter moving 6 m between 3 shots, or phones on the real map:
-          </p>
-          <pre>
-            npx tsx scripts/simulate.ts 2 -2 --shots 3 --move 6{"\n"}npx tsx scripts/simulate.ts 9 2 --geo
-            30.2849,-97.7341
-          </pre>
-          <p className={s.muted}>
-            The simulator clears the previous incident first; add <code>--keep</code> to append,{" "}
-            <code>--rooms 202,204</code> to use fewer phones, <code>--parallel</code> to have every phone report at the
-            same instant, or <code>--space CODE</code> to run in a demo space.
+        <section className={s.problem}>
+          <p className={s.problemLabel}>The problem</p>
+          <p className={s.problemText}>
+            Every minute a shooter goes unlocated is a minute responders spend searching. Calls conflict. Hallways
+            echo. Rooms get cleared one by one.{" "}
+            <span>
+              Belugo listens like its namesake: every phone in the building works together to pinpoint the
+              shooter&apos;s location.
+            </span>
           </p>
         </section>
 
-        <section className={s.devBlock}>
-          <h2>How localization works</h2>
-          <ol className={s.steps}>
-            <li>
-              <b>Line up the reports.</b> Each phone sends its own clock time of the sound&apos;s onset. The server adds
-              the phone&apos;s clock offset (re-synced every minute) and subtracts its calibrated audio delay; loudness
-              gets the mic calibration.
-            </li>
-            <li>
-              <b>Group into shots.</b> Reports within ±300 ms are one shot. One phone can only say &quot;near this
-              phone&quot;; two or more go to the grid search.
-            </li>
-            <li>
-              <b>Score every grid cell.</b> Loudness should fall 6 dB per doubling of distance, and each phone should
-              hear the shot <i>distance ÷ 343 m/s</i> after it was fired. The gun&apos;s loudness and firing time are
-              unknown, so they&apos;re fitted per cell; only differences between phones matter. Each phone counts by
-              how accurate its position and timing are, and the shading is the likelihood relative to the best cell.
-            </li>
-            <li>
-              <b>Pick the best fit.</b> The lowest-cost cell is the estimate. Two phones leave two mirror-image answers;
-              a third phone off their line settles it.
-            </li>
+        <section id="method" className={s.method}>
+          <div className={s.sectionHead}>
+            <p className={s.sectionLabel}>§ 1 · Method</p>
+            <h2 className={s.sectionTitle}>
+              Four steps,
+              <br />
+              <em>one shared picture.</em>
+            </h2>
+          </div>
+          <ol className={s.ledger}>
+            {STEPS.map((step) => (
+              <li key={step.n}>
+                <span className={s.ledgerNum}>{step.n}</span>
+                <div>
+                  <h3>{step.title}</h3>
+                  <p>{step.text}</p>
+                </div>
+                <code className={s.ledgerNote}>{step.note}</code>
+              </li>
+            ))}
           </ol>
-          <p className={s.muted}>
-            Tunables live in <code>lib/localize.ts</code> (and <code>lib/geo.ts</code> for the real map). Phone
-            settings are managed in the <Link href="/admin">admin panel</Link>; per-phone audio delays are measured
-            with a <Link href="/calibrate">timing calibration</Link>.
-          </p>
         </section>
 
-        <section className={s.devBlock}>
-          <h2>API</h2>
-          <div className={s.tableWrap}>
-            <table className={s.table}>
-              <tbody>
-                {ROUTES.map(([method, path, desc]) => (
-                  <tr key={method + path}>
-                    <td>
-                      <span className={method === "GET" ? s.get : s.post}>{method}</span>
-                    </td>
-                    <td className={s.mono}>
-                      {method === "GET" && path !== "/api/nearby" ? (
-                        <a href={path} target="_blank" rel="noreferrer">
-                          {path}
-                        </a>
-                      ) : (
-                        path
-                      )}
-                    </td>
-                    <td>{desc}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <section className={s.figures} aria-label="Key figures">
+          {FIGURES.map((f) => (
+            <div key={f.value} className={s.fig}>
+              <p className={s.figValue}>
+                {f.value}
+                <span>{f.unit}</span>
+              </p>
+              <p className={s.figText}>{f.text}</p>
+            </div>
+          ))}
+        </section>
+
+        <section className={s.judges} id="demo">
+          <div className={s.judgesInner}>
+            <p className={s.sectionLabelInv}>§ 2 · For judges</p>
+            <h2 className={s.judgesTitle}>
+              See it work in
+              <br />
+              <em>three minutes.</em>
+            </h2>
+            <ol className={s.route}>
+              <li>
+                <span className={s.routeTime}>0:00</span>
+                <b>Start a private demo space.</b> You get your own sandbox and a QR code, so other judges&apos; tests
+                never mix with yours.
+              </li>
+              <li>
+                <span className={s.routeTime}>0:30</span>
+                <b>Add three phones.</b> Scan the QR code with your phone, or open three browser tabs and put each one
+                in a different room.
+              </li>
+              <li>
+                <span className={s.routeTime}>1:30</span>
+                <b>Clap, or press Simulate shot.</b> Watch the dashboard mark the room, while every phone receives the
+                alert.
+              </li>
+            </ol>
+            <div className={s.judgesActions}>
+              <Link href="/spaces" className={s.invBtn}>
+                Open the live demo <span aria-hidden="true">→</span>
+              </Link>
+              <Link href="/docs" className={s.invLink}>
+                How it works
+              </Link>
+              <Link href="/incident" className={s.invLink}>
+                Incident dashboard
+              </Link>
+            </div>
           </div>
         </section>
 
-        <section className={s.devBlock}>
-          <h2>Rooms</h2>
-          <p className={s.muted}>
-            Use these IDs as <code>roomId</code> at check-in. Coordinates are meters on the demo floor plan, which runs
-            x −3 to 30, y −4 to 8.
+      </main>
+
+      <footer className={s.footer}>
+        <div className={s.footerRow}>
+          <p>
+            Named for the beluga, the whale that finds its way by listening.
+            <br />
+            Built at HackTX 2026.
           </p>
-          <ul className={s.rooms}>
-            {ROOMS.map((r) => (
-              <li key={r.id}>
-                <code>{r.id}</code> {r.name}{" "}
-                <span className={s.muted}>
-                  ({r.x}, {r.y})
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      </details>
-    </main>
+          <nav className={s.footerNav} aria-label="Footer">
+            <Link href="/spaces">Live demo</Link>
+            <Link href="/docs">Docs</Link>
+            <Link href="/incident">Dashboard</Link>
+            <Link href="/phone">Phone listener</Link>
+            <a href="https://github.com/bear102/hacktx-26" target="_blank" rel="noreferrer">
+              Source on GitHub ↗
+            </a>
+          </nav>
+        </div>
+        <p className={s.giant} aria-hidden="true">
+          belugo
+        </p>
+      </footer>
+    </div>
   );
 }

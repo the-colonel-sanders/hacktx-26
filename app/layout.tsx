@@ -1,29 +1,23 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import SpaceBadge, { SpaceBanner } from "./components/SpaceBadge";
+import { Instrument_Serif, Geist, Geist_Mono } from "next/font/google";
+import AppNav from "./components/AppNav";
 import "./globals.css";
 
-export const metadata: Metadata = { title: "Gunshot Locator" };
+const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal", "italic"], variable: "--font-serif" });
+const sans = Geist({ subsets: ["latin"], variable: "--font-sans" });
+const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
+
+export const metadata: Metadata = {
+  title: "Belugo: phones that hear where it happened",
+  description:
+    "Belugo turns ordinary classroom phones into a listening network that estimates where a sharp sound came from and alerts the building. HackTX 2026 prototype.",
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${serif.variable} ${sans.variable} ${mono.variable}`}>
       <body>
-        <nav className="nav">
-          <Link href="/" className="brand">
-            Gunshot Locator
-          </Link>
-          <SpaceBadge />
-          <Link href="/">Docs</Link>
-          <Link href="/incident">Incident dashboard</Link>
-          <Link href="/admin">Admin</Link>
-          <Link href="/phone">Phone</Link>
-          <Link href="/calibrate">Timing calibration</Link>
-          <a href="/api/incidents/current" target="_blank" rel="noreferrer">
-            Raw JSON
-          </a>
-        </nav>
-        <SpaceBanner />
+        <AppNav />
         {children}
       </body>
     </html>

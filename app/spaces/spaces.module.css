@@ -148,3 +148,64 @@
   margin: 0;
   color: var(--critical);
 }
+
+/* Numbered walkthrough steps */
+
+.guide {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  display: grid;
+  gap: 16px;
+  flex: 1;
+  min-width: 220px;
+}
+
+.guide > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 40px;
+  display: grid;
+  gap: 6px;
+}
+
+.guide > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: -1px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--heat);
+  border: 2px solid var(--heat);
+}
+
+.guide > li.done::before {
+  content: "✓";
+  color: #fff;
+  background: var(--good);
+  border-color: var(--good);
+}
+
+.guideTitle {
+  font-weight: 600;
+}
+
+.guideText {
+  color: var(--ink-2);
+}
+
+.guideOk {
+  color: var(--good-text);
+  font-weight: 600;
+}
+
+.card a:not(.primary):not(.secondary) {
+  color: var(--heat);
+}
