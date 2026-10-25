@@ -6,7 +6,7 @@ import { db } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-const ACTIVE_PHONE_MS = 15 * 60_000; // phones re-check in every minute while listening
+const ACTIVE_PHONE_MS = 3 * 60_000; // phones re-check in every minute while listening; closing the tab removes one at once
 
 // For the admin panel's Phones table: every recently active phone, where it's checked in, and its settings.
 export async function GET(req: Request) {

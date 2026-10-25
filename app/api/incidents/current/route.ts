@@ -6,7 +6,7 @@ import { db } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-const ACTIVE_DEVICE_MS = 15 * 60_000; // phones re-check-in every 3 min
+const ACTIVE_DEVICE_MS = 3 * 60_000; // phones re-check in every minute while listening; closing the tab removes one at once
 
 export async function GET(req: Request) {
   try {

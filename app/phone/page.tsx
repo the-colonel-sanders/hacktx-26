@@ -17,6 +17,7 @@ import {
   checkIn,
   getPhoneSettings,
   getTimingCal,
+  leave,
   now,
   reportTimingCal,
   sendDetection,
@@ -242,8 +243,9 @@ export default function PhonePage() {
   useEffect(() => () => cleanups.current.forEach((f) => f()), []);
 
   // Follow the phone on the real map while listening (when the admin panel has it on). Room / exact-spot phones can't:
-  // there's no indoor positioning to say where on the floor plan they went.
-  const followable = phase === "listening" && checkedIn != null && "lat" in checkedIn.location;
+  // there's no indoor positioning to say where on the floor plan they went. A hand-placed pin isn't followed either:
+  // it says where the phone is, and GPS (the laptop's, for tabs pinned apart in a demo) would drag it back.
+  const followable = phase === "listening" && checkedIn != null && "lat" in checkedIn.location && !pinned;
   useEffect(() => {
     if (!settings.followLocation || !followable) return;
     return startFollowing({
@@ -375,6 +377,13 @@ export default function PhonePage() {
       setDeviceId(res.deviceId);
       setSync(res.sync);
       setCheckedIn(me);
+
+      // Closing the tab: drop off the phone list. A page kept in the back/forward cache isn't closing.
+      const onPageHide = (e: PageTransitionEvent) => {
+        if (!e.persisted && deviceRef.current) leave(deviceRef.current);
+      };
+      window.addEventListener("pagehide", onPageHide);
+      cleanups.current.push(() => window.removeEventListener("pagehide", onPageHide));
 
       const resync = setInterval(async () => {
         try {
@@ -636,7 +645,9 @@ export default function PhonePage() {
                   <dd>
                     {!settings.followLocation
                       ? "Off"
-                      : followInfo
+                      : pinned
+                        ? "Paused · placed by hand"
+                        : followInfo
                         ? `On · GPS ±${Math.round(followInfo.lastFixAccuracyM)} m, ${Math.round(followInfo.movedM)} m from spot`
                         : "On · waiting for GPS…"}
                   </dd>

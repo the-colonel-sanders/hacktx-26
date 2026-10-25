@@ -114,6 +114,14 @@ async function claimDeviceId(): Promise<string | undefined> {
   return taken ? undefined : id; // undefined → server issues a new ID
 }
 
+/**
+ * Tell the server this tab is closing, so the phone leaves the admin panel and dashboard now rather
+ * than when its last check-in ages out. sendBeacon survives the page unloading; a plain fetch may not.
+ */
+export function leave(deviceId: string) {
+  navigator.sendBeacon?.("/api/phones/leave", new Blob([JSON.stringify({ deviceId })], { type: "application/json" }));
+}
+
 export const calibrate = (deviceId: string, peakDb: number) =>
   post<{ gainOffsetDb: number }>("/api/calibrate", { deviceId, peakDb });
 
