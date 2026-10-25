@@ -4,7 +4,7 @@
 
 ### HackTX 2026 · School Safety Prototype
 
-**This is A phone-based sensor network that compares sound timing and loudness to estimate where a sudden acoustic event originated.**
+**This is A phone based sensor network that compares sound timing and loudness to estimate where a sudden loud event originated.**
 
 **Next.js** · **TypeScript** · **Web Audio API** · **Supabase**
 
