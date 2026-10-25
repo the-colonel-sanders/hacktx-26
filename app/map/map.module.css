@@ -1,0 +1,65 @@
+.map {
+  width: 100%;
+  height: 420px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--grid);
+  font: inherit;
+  z-index: 0; /* keep Leaflet's panes under the site nav */
+}
+
+/* OSM tiles are light-only; dim and invert them so the map sits in the dark theme. */
+@media (prefers-color-scheme: dark) {
+  .map :global(.leaflet-tile-pane) {
+    filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9);
+  }
+}
+
+.map :global(.leaflet-control-attribution) {
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  color: var(--ink-2);
+}
+
+.map :global(.leaflet-control-attribution a) {
+  color: var(--ink-2);
+}
+
+/* Draggable "this phone is here" pin. */
+.pin {
+  border-radius: 50%;
+  background: var(--heat);
+  border: 3px solid var(--surface);
+  box-shadow: 0 0 0 1.5px var(--heat), 0 1px 4px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+
+/* Numbered earlier-shot markers on the trail. */
+.trailNum {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--ink-2);
+  color: var(--ink);
+  font: 600 10px/1 system-ui, sans-serif;
+}
+
+.hoverBox {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  pointer-events: none;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.wrap {
+  position: relative;
+}

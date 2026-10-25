@@ -4,9 +4,9 @@ import s from "./home.module.css";
 
 const ROUTES: [string, string, string][] = [
   ["GET", "/api/time", "Server clock. Phones call it ~5× at check-in to compute their clock offset."],
-  ["POST", "/api/checkin", "{ deviceId?, roomId OR x/y in meters, clockOffsetMs } → { deviceId, roomId }. With x/y, the room is the nearest one."],
+  ["POST", "/api/checkin", "{ deviceId?, roomId OR x/y in meters OR lat/lng + accuracyM (+ label), clockOffsetMs, clockRttMs? } → { deviceId, frame, roomId }. With x/y, the room is the nearest one."],
   ["POST", "/api/calibrate", "{ deviceId, peakDb } from a reference clap → stores the mic gain offset"],
-  ["POST", "/api/detection", "{ deviceId, localSpikeTsMs, peakDb, confidence, label } → { incidentId, estimate }"],
+  ["POST", "/api/detection", "{ deviceId, localSpikeTsMs, peakDb, confidence, label } → { incidentId, estimate: { x, y, lat, lng, roomId, label, deviceCount } }"],
   ["POST", "/api/status", "{ deviceId, status: safe | need_help | injured }"],
   ["POST", "/api/alert", "Raise a manual alert (creates an incident if none is active)"],
   ["POST", "/api/all-clear", "Clear the active incident"],
@@ -68,10 +68,12 @@ export default function Home() {
       <section className={s.card}>
         <h2>How localization works</h2>
         <p>
-          Each phone stands in for its room center. For every cell on the floor plan the server scores two things:
-          whether the loudness pattern fits sound fading with distance, and whether phones that heard it first are
-          closer. The lowest-cost cell is the estimate. Phones sync clocks with <code>/api/time</code> and calibrate
-          their mic with a reference clap so readings are comparable. Tunables live in <code>lib/localize.ts</code>.
+          Phones check in on the demo floor plan (a room or an exact spot) or on the real map (GPS, refined by
+          dropping a pin). For every cell around them the server scores two things: whether the loudness pattern fits
+          sound fading with distance, and whether the arrival times fit the distances. Each phone counts according to
+          how accurate its position and timing are. The lowest-cost cell is the estimate. Phones sync clocks with{" "}
+          <code>/api/time</code> and calibrate their mic with a reference clap so readings are comparable. Tunables
+          live in <code>lib/localize.ts</code> and <code>lib/geo.ts</code>.
         </p>
       </section>
 

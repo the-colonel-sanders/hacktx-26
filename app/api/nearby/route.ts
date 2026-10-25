@@ -6,6 +6,9 @@ export async function GET(req: NextRequest) {
   const lng = Number(sp.get("lng"));
   const q = sp.get("q") ?? "buildings";
 
+  if (!process.env.SERPAPI_KEY) {
+    return NextResponse.json({ error: "Nearby places need SERPAPI_KEY" }, { status: 503 });
+  }
   if (!Number.isFinite(lat) || !Number.isFinite(lng) ||
       Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 });

@@ -72,7 +72,7 @@ describe("gridSearch", () => {
       { x: 0, y: -3 },
       { x: 26, y: 5 },
     ];
-    const timeSigma = timeSigmaMs({ exact: true, calibrated: true, syncRttMs: 10 });
+    const timeSigma = timeSigmaMs({ posSigmaM: 0, calibrated: true, syncRttMs: 10 });
     let covered = 0;
     const N = 100;
     for (let k = 0; k < N; k++) {
@@ -99,11 +99,11 @@ describe("gridSearch", () => {
 
 describe("timeSigmaMs", () => {
   it("grows without timing calibration, with a slow clock sync, and for room-center phones", () => {
-    const base = timeSigmaMs({ exact: true, calibrated: true, syncRttMs: 10 });
+    const base = timeSigmaMs({ posSigmaM: 0, calibrated: true, syncRttMs: 10 });
     expect(base).toBeCloseTo(Math.sqrt(9 + 200 / 12), 6);
-    expect(timeSigmaMs({ exact: true, calibrated: false, syncRttMs: 10 })).toBeGreaterThan(base);
-    expect(timeSigmaMs({ exact: true, calibrated: true, syncRttMs: 60 })).toBeGreaterThan(base);
-    expect(timeSigmaMs({ exact: false, calibrated: true, syncRttMs: 10 })).toBeGreaterThan(base);
+    expect(timeSigmaMs({ posSigmaM: 0, calibrated: false, syncRttMs: 10 })).toBeGreaterThan(base);
+    expect(timeSigmaMs({ posSigmaM: 0, calibrated: true, syncRttMs: 60 })).toBeGreaterThan(base);
+    expect(timeSigmaMs({ posSigmaM: 3, calibrated: true, syncRttMs: 10 })).toBeGreaterThan(base);
   });
 });
 

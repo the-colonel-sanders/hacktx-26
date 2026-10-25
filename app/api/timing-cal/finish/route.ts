@@ -1,3 +1,4 @@
+import { toLocal } from "@/lib/geo";
 import { fail, json } from "@/lib/http";
 import { timingBiases } from "@/lib/localize";
 import { db } from "@/lib/supabase";
@@ -11,19 +12,35 @@ export async function POST() {
 
     const { data: reports, error } = await db()
       .from("timing_cal_reports")
-      .select("device_id, x, y, spike_ts_ms, devices(time_offset_ms)")
+      .select("device_id, x, y, lat, lng, spike_ts_ms, devices(time_offset_ms)")
       .eq("calibration_id", cal.id);
     if (error) throw error;
     if (reports.length < 2) return fail(`Need at least 2 phones to hear the reference sound (got ${reports.length})`);
 
+    // On the real map, measure in meters east/north of the reference spot.
+    const geo = cal.frame === "geo";
+    const ref = { lat: cal.lat!, lng: cal.lng! };
     const biases = timingBiases(
-      cal,
-      reports.map((r) => ({ deviceId: r.device_id, x: r.x, y: r.y, spikeTsMs: r.spike_ts_ms })),
+      geo ? { x: 0, y: 0 } : { x: cal.x!, y: cal.y! },
+      reports.map((r) => ({
+        deviceId: r.device_id,
+        ...(geo ? toLocal({ lat: r.lat, lng: r.lng }, ref) : { x: r.x, y: r.y }),
+        spikeTsMs: r.spike_ts_ms,
+      })),
     );
     const results: TimingResult[] = biases.map((b) => {
       const r = reports.find((rep) => rep.device_id === b.deviceId)!;
       const prevOffset = (r.devices as unknown as { time_offset_ms: number } | null)?.time_offset_ms ?? 0;
-      return { deviceId: b.deviceId, x: r.x, y: r.y, distanceM: b.distanceM, biasMs: b.biasMs, offsetMs: prevOffset + b.biasMs };
+      return {
+        deviceId: b.deviceId,
+        x: r.x,
+        y: r.y,
+        lat: r.lat,
+        lng: r.lng,
+        distanceM: b.distanceM,
+        biasMs: b.biasMs,
+        offsetMs: prevOffset + b.biasMs,
+      };
     });
 
     const calibratedAt = new Date().toISOString();

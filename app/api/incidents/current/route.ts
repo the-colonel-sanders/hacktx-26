@@ -13,17 +13,23 @@ export async function GET() {
     if (!incident) return json(null);
 
     const since = new Date(Date.now() - ACTIVE_DEVICE_MS).toISOString();
+    // Only phones on the incident's map (all of them while it has none yet).
+    let devicesQuery = db()
+      .from("devices")
+      .select("id, frame, room_id, x, y, lat, lng, pos_accuracy_m, place_label")
+      .gte("last_seen", since);
+    if (incident.frame) devicesQuery = devicesQuery.eq("frame", incident.frame);
     const [{ data: detections, error }, { data: devices, error: devErr }, { data: rooms, error: roomsErr }] =
       await Promise.all([
         db().from("detections").select("*").eq("incident_id", incident.id).order("spike_ts_ms"),
-        db().from("devices").select("id, room_id, x, y").gte("last_seen", since),
+        devicesQuery,
         db().from("rooms").select("id, name, x, y"),
       ]);
     if (error) throw error;
     if (devErr) throw devErr;
     if (roomsErr) throw roomsErr;
 
-    // Resolve every position (exact x/y, else room center) so clients don't have to.
+    // Resolve every floor-plan position (exact x/y, else room center) so clients don't have to. Map rows keep lat/lng.
     const roomById = new Map((rooms as Room[]).map((r) => [r.id, r]));
     const withPos = <T extends { x: number | null; y: number | null; room_id: string | null }>(row: T) => ({
       ...row,

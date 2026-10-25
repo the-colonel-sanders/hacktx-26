@@ -1,7 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ROOMS, inBounds } from "@/lib/floorplan";
+import { CAL_MAX_ACCURACY_M, MAX_GPS_ACCURACY_M, PIN_ACCURACY_M } from "@/lib/geo";
 import { browserDb } from "@/lib/supabaseBrowser";
 import {
   calibrate,
@@ -12,13 +14,19 @@ import {
   sendDetection,
   sendStatus,
   type ActiveTimingCal,
+  type Estimate,
   type PhoneLocation,
   type Sync,
 } from "./api";
 import { keepAwake, startListening, type AwakeStatus, type Level, type Spike } from "./audio";
 import { MIN_CONFIDENCE, classify } from "./detector";
+import type { GeoSpot } from "./GeoPicker";
+import { useGpsFix } from "./gps";
 import PositionPicker from "./PositionPicker";
 import s from "./phone.module.css";
+
+// Leaflet needs `window`.
+const GeoPicker = dynamic(() => import("./GeoPicker"), { ssr: false, loading: () => <p className={s.hint}>Loading map…</p> });
 
 // Phone clocks drift (tens of ppm ≈ a few ms per minute), and arrival times are compared
 // to a few ms, so re-sync often.
@@ -30,18 +38,44 @@ const TEST_WINDOW_MS = 10_000; // simulated shots in the same window (server clo
 const LOCKDOWN_KEY = "gunshot.lockdownScreen";
 
 type Status = "safe" | "need_help" | "injured";
-type ActiveIncident = { id: string; best_room_id: string | null } | null;
+type ActiveIncident = { id: string; best_room_id: string | null; best_label: string | null } | null;
+type CheckedIn = { location: PhoneLocation; roomId: string | null };
 type LogEntry = { t: number; text: string; tone?: "sent" | "muted" | "error" };
 
 const roomName = (id: string | null | undefined) => ROOMS.find((r) => r.id === id)?.name ?? id ?? "unknown";
-const describe = (roomId: string, spot: { x: number; y: number } | null) =>
-  spot ? `(${spot.x}, ${spot.y}) m · near ${roomName(roomId)}` : roomName(roomId);
+const describe = ({ location, roomId }: CheckedIn) =>
+  "lat" in location
+    ? `${location.label || "Map spot"} · ±${Math.round(location.accuracyM)} m`
+    : "x" in location
+      ? `(${location.x}, ${location.y}) m · near ${roomName(roomId)}`
+      : roomName(roomId);
+// For the lockdown screen: "you are …"
+const whereYouAre = ({ location, roomId }: CheckedIn) =>
+  "lat" in location ? (location.label ? `at ${location.label}` : null) : `${"x" in location ? "near" : "in"} ${roomName(roomId)}`;
+const incidentPlace = (i: NonNullable<ActiveIncident>) => i.best_label ?? roomName(i.best_room_id);
+const estimateName = (e: Estimate) =>
+  e.label ?? (e.lat != null && e.lng != null ? `${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : roomName(e.roomId));
+
+/** Why this phone can't take part in a timing calibration (same map, precise spot), or null if it can. */
+function calibrationProblem({ location }: CheckedIn, cal: NonNullable<ActiveTimingCal>): string | null {
+  const onMap = "lat" in location;
+  if (onMap !== (cal.frame === "geo")) {
+    return `This phone is checked in on ${onMap ? "the real map" : "the floor plan"}, but the calibration is on ${onMap ? "the floor plan" : "the real map"}, so it can't take part.`;
+  }
+  if ("lat" in location) {
+    return location.accuracyM <= CAL_MAX_ACCURACY_M ? null : "This phone's spot came from GPS, so it can't take part. Place the pin by hand.";
+  }
+  return "x" in location ? null : "This phone is checked in by room, so it can't take part. Use an exact spot.";
+}
 
 export default function PhonePage() {
-  const [mode, setMode] = useState<"room" | "spot">("room");
+  const [mode, setMode] = useState<"room" | "spot" | "map">("room");
   const [roomId, setRoomId] = useState("");
   const [spot, setSpot] = useState<{ x: number; y: number } | null>(null);
-  const [checkedIn, setCheckedIn] = useState<{ roomId: string; spot: { x: number; y: number } | null } | null>(null);
+  const [geoSpot, setGeoSpot] = useState<GeoSpot | null>(null);
+  const [pinned, setPinned] = useState(false); // placed by hand rather than by GPS
+  const [placeLabel, setPlaceLabel] = useState("");
+  const [checkedIn, setCheckedIn] = useState<CheckedIn | null>(null);
   const [phase, setPhase] = useState<"setup" | "starting" | "listening">("setup");
   const [error, setError] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
@@ -71,7 +105,7 @@ export default function PhonePage() {
   // Location from the URL (?room=203 from a QR code, or ?x=7.5&y=2), else the last one used.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    let saved: { roomId?: string; x?: number; y?: number } = {};
+    let saved: { roomId?: string; x?: number; y?: number; lat?: number; lng?: number; accuracyM?: number; label?: string } = {};
     try {
       saved = JSON.parse(localStorage.getItem(LOCATION_KEY) ?? "{}");
     } catch {}
@@ -86,6 +120,11 @@ export default function PhonePage() {
     } else if (pt && inBounds(pt.x, pt.y)) {
       setMode("spot");
       setSpot(pt);
+    } else if (!room && !urlSpot && saved.lat != null && saved.lng != null && saved.accuracyM != null) {
+      setMode("map");
+      setGeoSpot({ lat: saved.lat, lng: saved.lng, accuracyM: saved.accuracyM });
+      setPinned(saved.accuracyM <= PIN_ACCURACY_M);
+      setPlaceLabel(saved.label ?? "");
     }
     try {
       setLockdownScreen(localStorage.getItem(LOCKDOWN_KEY) === "on");
@@ -104,7 +143,7 @@ export default function PhonePage() {
     try {
       const res = await fetch("/api/incidents/current", { cache: "no-store" });
       const data = await res.json();
-      setIncident(res.ok && data ? { id: data.id, best_room_id: data.best_room_id } : null);
+      setIncident(res.ok && data ? { id: data.id, best_room_id: data.best_room_id, best_label: data.best_label } : null);
     } catch {}
   }, []);
 
@@ -115,8 +154,8 @@ export default function PhonePage() {
       .channel("phone-alerts")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "alerts" }, refreshIncident)
       .on("postgres_changes", { event: "*", schema: "public", table: "incidents" }, (p) => {
-        const row = p.new as { id: string; status: string; best_room_id: string | null };
-        if (row?.status === "active") setIncident({ id: row.id, best_room_id: row.best_room_id });
+        const row = p.new as { id: string; status: string; best_room_id: string | null; best_label: string | null };
+        if (row?.status === "active") setIncident({ id: row.id, best_room_id: row.best_room_id, best_label: row.best_label });
         else refreshIncident();
       })
       .subscribe();
@@ -190,7 +229,7 @@ export default function PhonePage() {
         label,
       });
       addLog(
-        `Reported ${spike.peakDb.toFixed(0)} dB (confidence ${confidence}) → estimate ${roomName(estimate.roomId)}, ${estimate.deviceCount} phone(s)`,
+        `Reported ${spike.peakDb.toFixed(0)} dB (confidence ${confidence}) → estimate ${estimateName(estimate)}, ${estimate.deviceCount} phone(s)`,
         "sent",
       );
     } catch (e) {
@@ -198,8 +237,25 @@ export default function PhonePage() {
     }
   }, []);
 
+  // On the real map, take the GPS fix until a pin is placed by hand; fixes rougher than MAX_GPS_ACCURACY_M need a pin.
+  const gps = useGpsFix(mode === "map" && !pinned && phase === "setup");
+  useEffect(() => {
+    if (gps.fix && !pinned) setGeoSpot(gps.fix);
+  }, [gps.fix, pinned]);
+
+  const label = placeLabel.trim();
   const location: PhoneLocation | null =
-    mode === "room" ? (roomId ? { roomId } : null) : spot && inBounds(spot.x, spot.y) ? spot : null;
+    mode === "room"
+      ? roomId
+        ? { roomId }
+        : null
+      : mode === "spot"
+        ? spot && inBounds(spot.x, spot.y)
+          ? spot
+          : null
+        : geoSpot && geoSpot.accuracyM <= MAX_GPS_ACCURACY_M
+          ? { lat: geoSpot.lat, lng: geoSpot.lng, accuracyM: geoSpot.accuracyM, ...(label ? { label } : {}) }
+          : null;
 
   const start = async () => {
     if (!location) return;
@@ -215,11 +271,11 @@ export default function PhonePage() {
       cleanups.current.push(await keepAwake(setAwake));
 
       const res = await checkIn(location);
-      const mySpot = "x" in location ? location : null;
+      const me: CheckedIn = { location, roomId: res.roomId };
       deviceRef.current = res.deviceId;
       setDeviceId(res.deviceId);
       setSync(res.sync);
-      setCheckedIn({ roomId: res.roomId, spot: mySpot });
+      setCheckedIn(me);
 
       const resync = setInterval(async () => {
         try {
@@ -229,7 +285,7 @@ export default function PhonePage() {
       cleanups.current.push(() => clearInterval(resync));
 
       setPhase("listening");
-      addLog(`Checked in: ${describe(res.roomId, mySpot)}`);
+      addLog(`Checked in: ${describe(me)}`);
     } catch (e) {
       cleanups.current.forEach((f) => f());
       cleanups.current = [];
@@ -260,7 +316,7 @@ export default function PhonePage() {
         label: "test shot",
       });
       addLog(
-        `Simulated: ${testDb} dB, heard +${testDelayMs} ms → estimate ${roomName(estimate.roomId)}, ${estimate.deviceCount} phone(s)`,
+        `Simulated: ${testDb} dB, heard +${testDelayMs} ms → estimate ${estimateName(estimate)}, ${estimate.deviceCount} phone(s)`,
         "sent",
       );
     } catch (e) {
@@ -286,8 +342,8 @@ export default function PhonePage() {
           <p className={s.alertKicker}>⚠ Building alert</p>
           <h1 className={s.alertTitle}>Lockdown</h1>
           <p className={s.alertWhere}>
-            Shots reported near <b>{roomName(incident.best_room_id)}</b>
-            {checkedIn && <> · you are {checkedIn.spot ? "near" : "in"} {roomName(checkedIn.roomId)}</>}
+            Shots reported near <b>{incidentPlace(incident)}</b>
+            {checkedIn && whereYouAre(checkedIn) && <> · you are {whereYouAre(checkedIn)}</>}
           </p>
           <ul className={s.alertSteps}>
             <li>Lock or barricade the door. Turn off the lights.</li>
@@ -332,7 +388,7 @@ export default function PhonePage() {
 
       {incident && (
         <p className={s.banner}>
-          <b>Alert active</b> · shots near {roomName(incident.best_room_id)}. Lockdown screen is off for testing.
+          <b>Alert active</b> · shots near {incidentPlace(incident)}. Lockdown screen is off for testing.
         </p>
       )}
 
@@ -346,6 +402,9 @@ export default function PhonePage() {
             <button role="tab" aria-selected={mode === "spot"} className={mode === "spot" ? s.segOn : ""} onClick={() => setMode("spot")}>
               Exact spot
             </button>
+            <button role="tab" aria-selected={mode === "map"} className={mode === "map" ? s.segOn : ""} onClick={() => setMode("map")}>
+              Real map
+            </button>
           </div>
 
           {mode === "room" ? (
@@ -357,7 +416,7 @@ export default function PhonePage() {
                 </option>
               ))}
             </select>
-          ) : (
+          ) : mode === "spot" ? (
             <>
               <PositionPicker value={spot} onChange={setSpot} />
               <div className={s.xy}>
@@ -385,6 +444,47 @@ export default function PhonePage() {
               <p className={s.hint}>Tap the map or type coordinates. Squares are room centers. The floor runs x −3 to 30 m, y −4 to 8 m.</p>
               {spot && !inBounds(spot.x, spot.y) && <p className={s.error}>That spot is outside the floor plan.</p>}
             </>
+          ) : (
+            <>
+              <GeoPicker
+                value={geoSpot}
+                onChange={(p) => {
+                  setGeoSpot({ ...p, accuracyM: PIN_ACCURACY_M });
+                  setPinned(true);
+                }}
+                follow={!pinned}
+              />
+              <p className={s.hint}>
+                {pinned ? (
+                  <>
+                    Placed by hand (±{PIN_ACCURACY_M} m). Drag the pin to adjust, or{" "}
+                    <button className={s.linkBtn} onClick={() => setPinned(false)}>
+                      use GPS again
+                    </button>
+                    .
+                  </>
+                ) : !geoSpot ? (
+                  "Finding your location… or tap the map where this phone is."
+                ) : geoSpot.accuracyM > 10 ? (
+                  `GPS says ±${Math.round(geoSpot.accuracyM)} m, which is rough. Drag the pin to exactly where this phone is: every meter of error moves the shot estimate too.`
+                ) : (
+                  `GPS says ±${Math.round(geoSpot.accuracyM)} m. Drag the pin if it's off.`
+                )}
+              </p>
+              {gps.error && !pinned && <p className={s.error}>{gps.error}</p>}
+              {geoSpot && geoSpot.accuracyM > MAX_GPS_ACCURACY_M && (
+                <p className={s.error}>That fix is too rough to use. Tap the map where this phone is.</p>
+              )}
+              <label className={s.field}>
+                Label (optional)
+                <input
+                  value={placeLabel}
+                  maxLength={60}
+                  placeholder="e.g. Room 214, 2nd floor"
+                  onChange={(e) => setPlaceLabel(e.target.value)}
+                />
+              </label>
+            </>
           )}
 
           <button className={s.primary} onClick={start} disabled={!location || phase === "starting"}>
@@ -400,7 +500,7 @@ export default function PhonePage() {
           <section className={s.card}>
             <div className={s.row}>
               <span className={s.live}>● Listening</span>
-              <span>{checkedIn && describe(checkedIn.roomId, checkedIn.spot)}</span>
+              <span>{checkedIn && describe(checkedIn)}</span>
             </div>
             <Meter level={level} />
             <dl className={s.facts}>
@@ -435,9 +535,12 @@ export default function PhonePage() {
 
           {timingCal && (
             <p className={s.calBanner}>
-              <b>Timing calibration running.</b> Make one sharp sound at ({timingCal.x}, {timingCal.y}) m. Sounds this
-              phone hears now are used for calibration, not reported as shots.
-              {!checkedIn?.spot && " This phone is checked in by room, so it can't take part. Use an exact spot."}
+              <b>Timing calibration running.</b> Make one sharp sound at{" "}
+              {timingCal.frame === "geo"
+                ? `the spot marked on the calibration map (${timingCal.lat!.toFixed(5)}, ${timingCal.lng!.toFixed(5)})`
+                : `(${timingCal.x}, ${timingCal.y}) m`}
+              . Sounds this phone hears now are used for calibration, not reported as shots.
+              {checkedIn && calibrationProblem(checkedIn, timingCal) && ` ${calibrationProblem(checkedIn, timingCal)}`}
             </p>
           )}
 

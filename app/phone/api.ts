@@ -45,14 +45,20 @@ export async function syncClock(samples = 12): Promise<Sync> {
   return best;
 }
 
-/** Where the phone is: a room (its center is used), or an exact spot in meters. */
-export type PhoneLocation = { roomId: string } | { x: number; y: number };
+/**
+ * Where the phone is. On the demo floor plan: a room (its center is used) or an exact spot in meters.
+ * On the real map: lat/lng with its accuracy radius in meters (GPS, or a hand-placed pin) and an optional label.
+ */
+export type PhoneLocation =
+  | { roomId: string }
+  | { x: number; y: number }
+  | { lat: number; lng: number; accuracyM: number; label?: string };
 
 export async function checkIn(
   location: PhoneLocation,
-): Promise<{ deviceId: string; roomId: string; sync: Sync }> {
+): Promise<{ deviceId: string; roomId: string | null; sync: Sync }> {
   const sync = await syncClock();
-  const { deviceId, roomId } = await post<{ deviceId: string; roomId: string }>("/api/checkin", {
+  const { deviceId, roomId } = await post<{ deviceId: string; roomId: string | null }>("/api/checkin", {
     deviceId: await claimDeviceId(),
     ...location,
     clockOffsetMs: sync.offsetMs,
@@ -115,7 +121,7 @@ export const sendDetection = (body: {
   peakDb: number;
   confidence: number;
   label: string;
-}) => post<{ incidentId: string; estimate: { x: number; y: number; roomId: string | null; deviceCount: number } }>(
+}) => post<{ incidentId: string; estimate: Estimate }>(
   "/api/detection",
   body,
 );
@@ -123,12 +129,32 @@ export const sendDetection = (body: {
 export const sendStatus = (deviceId: string, status: "safe" | "need_help" | "injured") =>
   post("/api/status", { deviceId, status });
 
-export type ActiveTimingCal = { id: string; x: number; y: number } | null;
+export type Estimate = {
+  x: number;
+  y: number;
+  lat: number | null; // real map only
+  lng: number | null;
+  roomId: string | null; // floor plan only
+  label: string | null; // room name, or the nearest labeled phone on the real map
+  deviceCount: number;
+};
+
+// The reference spot is x/y on the floor plan or lat/lng on the real map.
+export type ActiveTimingCal = {
+  id: string;
+  frame: "grid" | "geo";
+  x: number | null;
+  y: number | null;
+  lat: number | null;
+  lng: number | null;
+} | null;
 
 export async function getTimingCal(): Promise<ActiveTimingCal> {
   const res = await fetch("/api/timing-cal", { cache: "no-store" });
   const data = await res.json();
-  return res.ok && data.active ? { id: data.active.id, x: data.active.x, y: data.active.y } : null;
+  if (!res.ok || !data.active) return null;
+  const { id, frame, x, y, lat, lng } = data.active;
+  return { id, frame: frame ?? "grid", x, y, lat, lng };
 }
 
 export const reportTimingCal = (deviceId: string, localSpikeTsMs: number, peakDb: number) =>

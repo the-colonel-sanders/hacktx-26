@@ -23,9 +23,9 @@ export default function FloorMap({ incident }: { incident: IncidentView }) {
   const phones = useMemo(() => {
     const last = trail[trail.length - 1];
     const byId = new Map<string, { x: number; y: number; db: number | null }>();
-    for (const d of incident.devices ?? []) byId.set(d.id, { x: d.x, y: d.y, db: null });
+    for (const d of incident.devices ?? []) if (d.x != null && d.y != null) byId.set(d.id, { x: d.x, y: d.y, db: null });
     for (const d of incident.detections) {
-      if (!last || Math.abs(d.spike_ts_ms - last.t) > SHOT_WINDOW_MS) continue;
+      if (!last || d.x == null || d.y == null || Math.abs(d.spike_ts_ms - last.t) > SHOT_WINDOW_MS) continue;
       const prev = byId.get(d.device_id);
       // Position from the detection: where the phone was when it heard the shot.
       byId.set(d.device_id, { x: d.x, y: d.y, db: Math.max(prev?.db ?? -Infinity, d.norm_peak_db) });

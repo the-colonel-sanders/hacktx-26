@@ -79,6 +79,24 @@ alter table devices    add column if not exists time_calibrated_at timestamptz;
 alter table devices    add column if not exists clock_rtt_ms float8;  -- round trip of the best clock-sync sample
 alter table detections add column if not exists time_sigma_ms float8;  -- expected arrival-time error when heard
 
+-- Geo mode: phones placed on the real map (lat/lng) instead of the demo floor plan ("grid").
+-- An incident uses one frame, set by its first detection; phones in the other frame are turned away.
+alter table devices alter column room_id drop not null;  -- geo phones have no room
+alter table devices add column if not exists frame text not null default 'grid' check (frame in ('grid', 'geo'));
+alter table devices add column if not exists pos_accuracy_m float8;  -- geo: reported accuracy radius (or a hand-placed pin's)
+alter table devices add column if not exists place_label text;  -- geo: what the user called the spot, e.g. "Room 214"
+alter table detections
+  add column if not exists lat float8,
+  add column if not exists lng float8,
+  add column if not exists pos_sigma_m float8;  -- how far the recorded position may be off (1σ)
+alter table incidents
+  add column if not exists frame text check (frame in ('grid', 'geo')),
+  add column if not exists origin_lat float8,  -- geo: x/y, trail and heatmap are meters east/north of this
+  add column if not exists origin_lng float8,
+  add column if not exists best_lat float8,
+  add column if not exists best_lng float8,
+  add column if not exists best_label text;  -- room name (grid) or nearest phone's label (geo)
+
 create table if not exists timing_calibrations (
   id          uuid primary key default gen_random_uuid(),
   x           float8 not null,  -- where the reference sound is made
@@ -100,6 +118,19 @@ create table if not exists timing_cal_reports (
   created_at     timestamptz not null default now(),
   primary key (calibration_id, device_id)
 );
+
+-- Geo mode: the reference spot and phones are lat/lng instead of floor-plan x/y.
+alter table timing_calibrations
+  add column if not exists frame text not null default 'grid' check (frame in ('grid', 'geo')),
+  add column if not exists lat float8,
+  add column if not exists lng float8,
+  alter column x drop not null,
+  alter column y drop not null;
+alter table timing_cal_reports
+  add column if not exists lat float8,
+  add column if not exists lng float8,
+  alter column x drop not null,
+  alter column y drop not null;
 
 -- RLS: anon (publishable key) can only read rooms/incidents/alerts/statuses.
 -- All writes go through API routes using the secret key, which bypasses RLS.

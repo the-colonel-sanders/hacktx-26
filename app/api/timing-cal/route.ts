@@ -17,7 +17,7 @@ export async function GET() {
     if (active) {
       const { data, error: repErr } = await db()
         .from("timing_cal_reports")
-        .select("device_id, x, y, peak_db, created_at")
+        .select("device_id, x, y, lat, lng, peak_db, created_at")
         .eq("calibration_id", active.id)
         .order("created_at");
       if (repErr) throw repErr;
