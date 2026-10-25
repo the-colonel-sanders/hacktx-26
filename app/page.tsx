@@ -1,3 +1,4 @@
+"use client";
 import Link from "next/link";
 import { ROOMS } from "@/lib/floorplan";
 import s from "./home.module.css";
