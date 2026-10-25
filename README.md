@@ -8,9 +8,9 @@
 
 **Next.js** · **TypeScript** · **Web Audio API** · **Supabase**
 
-[How it works](#how-it-works) · [Run locally](#getting-started) · [Demo](Belugo.tech) · [API](#api-reference)
+[How it works](#how-it-works) · [Run locally](#getting-started) · [API](#api-reference)
 
-**Judges find the demo at:** Belugo.tech
+**Find the demo at:** Belugo.tech
 
 </div>
 
