@@ -13,3 +13,6 @@ next-env.d.ts
 __pycache__/
 
 certificates
+*.json
+package-lock.json
+package.json
