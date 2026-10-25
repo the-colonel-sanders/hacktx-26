@@ -8,9 +8,9 @@
 
 **Next.js** · **TypeScript** · **Web Audio API** · **Supabase**
 
-[How it works](#how-it-works) · [Run locally](#getting-started) · [Demo](#testing-and-demonstration) · [API](#api-reference)
+[How it works](#how-it-works) · [Run locally](#getting-started) · [Demo](Belugo.tech) · [API](#api-reference)
 
-**Judges: start with [DEMO.md](DEMO.md)**, a step-by-step guide to running it with three listeners on one laptop or a real phone.
+**Judges find the demo at:** Belugo.tech
 
 </div>
 
@@ -33,7 +33,7 @@ The central idea is straightforward: **the same sound generally reaches nearby p
 
 Participants open the existing [`/phone`](app/phone) interface and press **Start listening**.
 
-(will update this section when code is updated)
+Each phone registers its location when joining the network. Users can select a room, choose a position on a map, or use their phone's GPS to estimate their location. The system uses these positions to compare sound detections and estimate where an event originated.
 
 ### 2. Detect a sharp sound locally
 
@@ -67,10 +67,8 @@ At each candidate point it asks two questions:
 2. **Loudness:** Would this point reasonably explain why some phones reported a stronger impulse than others?
 
 
-<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/a6ab38aa-b61c-421e-adff-c0ee8f32c1f5" />
+<img width="1293" height="650" alt="image" src="https://github.com/user-attachments/assets/72ea94d0-b6d1-403d-a960-0dec07812664" />
 
-
-*The illustrated dB levels and arrival order are examples for the sake of explanation, not measured data. Microphone sensitivity and sound reflections can affect loudness as well as distance.*
 
 > **What does the map show?** An **estimated acoustic origin**, not the exact confirmed position of a person. Sensor placement, echoes, microphone differences, GPS errors, and synchronization can all shift the result.
 
