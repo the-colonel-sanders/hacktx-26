@@ -1,6 +1,11 @@
+"use client";
 import Link from "next/link";
 import { ROOMS } from "@/lib/floorplan";
 import s from "./home.module.css";
+import { useState } from "react";
+import NearbyBuildingsPanel from "@/app/components/NearbyBuildingsPanel";
+import { useNearbyBuildings } from "@/app/hooks/useNearbyBuildings";
+import type { GunshotEvent } from "@/app/types/nearby";
 
 const PAGES: { href: string; title: string; desc: string; external?: boolean }[] = [
   { href: "/incident", title: "Incident dashboard", desc: "Live map, heatmap, shot trail and detections for the active incident." },
@@ -28,6 +33,10 @@ const ROUTES: [string, string, string][] = [
 ];
 
 export default function Home() {
+
+  const [latestGunshot, setLatestGunshot] = useState<GunshotEvent | null>(null);
+  const { data, loading, error } = useNearbyBuildings(latestGunshot);
+
   return (
     <main className={s.page}>
       <section>
@@ -217,6 +226,13 @@ export default function Home() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className={s.card}>
+        {/* new */}
+        <div className="w-96 border-l">
+          <NearbyBuildingsPanel data={data} loading={loading} error={error} />
+        </div>
       </section>
     </main>
   );
