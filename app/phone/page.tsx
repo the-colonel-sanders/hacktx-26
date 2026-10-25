@@ -101,6 +101,8 @@ export default function PhonePage() {
   const [myStatus, setMyStatus] = useState<Status | null>(null);
   // Off while testing: alerts show as a banner instead of taking over the screen.
   const [lockdownScreen, setLockdownScreen] = useState(false);
+  // Incident whose lockdown screen was closed by hand; a new incident shows it again.
+  const [dismissedIncident, setDismissedIncident] = useState<string | null>(null);
   const [testDb, setTestDb] = useState(-15);
   const [testDelayMs, setTestDelayMs] = useState(0);
   const [windowLeft, setWindowLeft] = useState(0);
@@ -365,7 +367,7 @@ export default function PhonePage() {
     }
   };
 
-  if (incident && lockdownScreen) {
+  if (incident && lockdownScreen && dismissedIncident !== incident.id) {
     return (
       <main className={s.alert}>
         <div className={s.alertInner}>
@@ -407,6 +409,9 @@ export default function PhonePage() {
             <p className={s.alertNote}>This phone isn&apos;t checked in, so it can&apos;t report status.</p>
           )}
           {phase === "listening" && <p className={s.alertNote}>● Still listening and reporting</p>}
+          <button className={s.exitBtn} onClick={() => setDismissedIncident(incident.id)}>
+            Exit lockdown screen
+          </button>
         </div>
       </main>
     );
@@ -418,7 +423,14 @@ export default function PhonePage() {
 
       {incident && (
         <p className={s.banner}>
-          <b>Alert active</b> · shots near {incidentPlace(incident)}. Lockdown screen is off for testing.
+          <b>Alert active</b> · shots near {incidentPlace(incident)}.{" "}
+          {lockdownScreen ? (
+            <button className={s.linkBtn} onClick={() => setDismissedIncident(null)}>
+              Show lockdown screen
+            </button>
+          ) : (
+            "Lockdown screen is off for testing."
+          )}
         </p>
       )}
 
