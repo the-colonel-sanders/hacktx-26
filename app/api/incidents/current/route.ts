@@ -24,6 +24,7 @@ export async function GET() {
       { data: devices, error: devErr },
       { data: rooms, error: roomsErr },
       { data: statuses, error: stErr },
+      { data: heatmapRow, error: hmErr },
     ] = await Promise.all([
       db().from("detections").select("*").eq("incident_id", incident.id).order("spike_ts_ms"),
       devicesQuery,
@@ -34,11 +35,13 @@ export async function GET() {
         .select("device_id, status, updated_at, devices(frame, room_id, x, y, lat, lng, place_label)")
         .gte("updated_at", incident.started_at)
         .order("updated_at", { ascending: false }),
+      db().from("incident_heatmaps").select("heatmap").eq("incident_id", incident.id).maybeSingle(),
     ]);
     if (error) throw error;
     if (devErr) throw devErr;
     if (roomsErr) throw roomsErr;
     if (stErr) throw stErr;
+    if (hmErr) throw hmErr;
 
     // Resolve every floor-plan position (exact x/y, else room center) so clients don't have to. Map rows keep lat/lng.
     const roomById = new Map((rooms as Room[]).map((r) => [r.id, r]));
@@ -74,6 +77,7 @@ export async function GET() {
 
     return json({
       ...incident,
+      heatmap: heatmapRow?.heatmap ?? null,
       detections: detections.map(withPos),
       devices: devices.map(withPos),
       statuses: statusRows,

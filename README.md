@@ -240,6 +240,7 @@ Additional flags documented by the current script:
 | `--move 4` | Move the simulated source 4 m along X between events |
 | `--rooms 202,204` | Limit the synthetic sensor set |
 | `--keep` | Preserve an existing incident instead of clearing it first |
+| `--parallel` | Send every phone's report at the same instant, like real phones (exercises batched localization) |
 | `--geo 30.2849,-97.7341` | Put the simulated phones on the real map around that point (X = meters east, Y = meters north), as hand-placed pins |
 | `--gps 15` | With `--geo`: place the phones by simulated GPS, about 15 m off, instead of by pin |
 
@@ -249,8 +250,8 @@ Additional flags documented by the current script:
 
 1. Start the application using an **HTTPS deployment or tunnel** reachable from the phones, such as a Vercel deployment or an ngrok HTTPS tunnel.
 2. Open `/phone` on each participating device.
-3. Choose a room or local X/Y spot and press **Start listening**; grant microphone permission.
-4. Use the app's calibration controls where appropriate.
+3. In the admin panel (`/admin`), set **All phones → Location** to Room, Exact spot or Real map. Each phone then picks its room, spot or map pin and presses **Start listening**; grant microphone permission.
+4. Calibrate each phone's mic from the admin panel (the phone waits for one clap about 1 m away), and run timing calibration where appropriate.
 5. Make a **controlled clap** in an authorized test area and check the activity log and incident display.
 6. Compare any reported location with the known test spot. Record the errors across repeated tests rather than reporting a single best case.
 
@@ -295,9 +296,16 @@ The existing app documents these JSON endpoints. Check the individual route impl
 | `POST` | `/api/status` | Report a participant's status for the active incident |
 | `POST` | `/api/alert` | Trigger an incident alert |
 | `POST` | `/api/all-clear` | Clear an active incident |
-| `GET` | `/api/incidents/current` | Read the active incident |
+| `GET` | `/api/incidents/current` | Read the active incident, with heatmap and detections (dashboard) |
+| `GET` | `/api/incidents/summary` | Just the active incident's id and estimated place (what phones poll) |
+| `GET` | `/api/phones` | Recently active phones, where each is checked in, and its settings (admin panel) |
+| `GET` | `/api/phones/settings?deviceId=` | The settings a phone should follow (phones poll this) |
+| `POST` | `/api/phones/settings` | `{ target: deviceId \| "all", patch }`: change phone settings from the admin panel |
+| `POST` | `/api/phones/calibrate-mic` | `{ deviceId }`: ask a phone to calibrate its mic on the next clap |
 
 The phone client also uses **timing calibration** endpoints (`/api/timing-cal` and `/api/timing-cal/report`).
+
+**Phone settings** are managed from the admin panel (`/admin`), not on the phones: which kind of location each phone gives (the phone still picks the room, spot or pin itself), lockdown screen, follow location, timing method, whether the **Simulate shot** button shows and what loudness/delay it reports, and mic calibration. A phone uses the built-in defaults (`lib/phoneSettings.ts`), overridden by the **All phones** row, overridden by its own row; phones pick up changes within about 2 seconds.
 
 **Detection request example** (illustrative values):
 

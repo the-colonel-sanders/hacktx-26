@@ -9,7 +9,8 @@ import type { GunshotEvent } from "@/app/types/nearby";
 
 const PAGES: { href: string; title: string; desc: string; external?: boolean }[] = [
   { href: "/incident", title: "Incident dashboard", desc: "Live map, heatmap, shot trail and detections for the active incident." },
-  { href: "/phone", title: "Phone listener", desc: "Open on each phone: check in, listen, calibrate, and simulate test shots." },
+  { href: "/admin", title: "Admin", desc: "Manage the phones: location mode, lockdown screen, timing, simulated shots and mic calibration." },
+  { href: "/phone", title: "Phone listener", desc: "Open on each phone: check in and listen. Its settings come from the admin panel." },
   { href: "/calibrate", title: "Timing calibration", desc: "Measure each phone's audio delay with one reference sound at a known spot." },
   { href: "/qr", title: "Room QR codes", desc: "Printable codes that open the listener with a room preselected." },
   { href: "/api/incidents/current", title: "Raw incident JSON", desc: "What the dashboard reads, for debugging.", external: true },
@@ -23,7 +24,12 @@ const ROUTES: [string, string, string][] = [
   ["POST", "/api/status", "{ deviceId, status: safe | need_help | injured }"],
   ["POST", "/api/alert", "Raise a manual alert (creates an incident if none is active)"],
   ["POST", "/api/all-clear", "Clear the active incident"],
-  ["GET", "/api/incidents/current", "Active incident with heatmap, trail, detections and recently active phones, or null"],
+  ["GET", "/api/incidents/current", "Active incident with heatmap, trail, detections, status reports and recently active phones, or null (dashboard)"],
+  ["GET", "/api/incidents/summary", "Just the active incident's id, status and estimated place, or null (what phones poll)"],
+  ["GET", "/api/phones", "Recently active phones with where each is checked in and its settings (admin panel)"],
+  ["GET", "/api/phones/settings", "?deviceId= → the settings a phone should follow (phones poll this)"],
+  ["POST", "/api/phones/settings", "{ target: deviceId | \"all\", patch }: change phone settings from the admin panel"],
+  ["POST", "/api/phones/calibrate-mic", "{ deviceId }: ask a phone to calibrate its mic on the next clap"],
   ["GET", "/api/timing-cal", "Running timing calibration (with phones that have reported) and the last finished one"],
   ["POST", "/api/timing-cal/start", "{ x, y } or { lat, lng }: where the reference sound will be made"],
   ["POST", "/api/timing-cal/report", "{ deviceId, localSpikeTsMs, peakDb }: a phone heard the reference (loudest kept)"],
@@ -83,7 +89,8 @@ export default function Home() {
           </li>
           <li>
             Watch the estimate and trail update, then press <b>All clear</b>. The simulator clears the previous
-            incident first; add <code>--keep</code> to append, or <code>--rooms 202,204</code> to use fewer phones.
+            incident first; add <code>--keep</code> to append, <code>--rooms 202,204</code> to use fewer phones, or{" "}
+            <code>--parallel</code> to have every phone report at the same instant, like real phones.
           </li>
         </ol>
         <p className={s.muted}>

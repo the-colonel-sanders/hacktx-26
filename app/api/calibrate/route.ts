@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     const gainOffsetDb = peakDb - REFERENCE_DB;
     const { data, error } = await db()
       .from("devices")
-      .update({ gain_offset_db: gainOffsetDb, last_seen: new Date().toISOString() })
+      .update({ gain_offset_db: gainOffsetDb, gain_calibrated_at: new Date().toISOString(), last_seen: new Date().toISOString() })
       .eq("id", deviceId)
       .select("id");
     if (error) return fail(error.message, 500);

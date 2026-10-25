@@ -9,6 +9,7 @@
 // --rooms limits the fake phones to those room ids (default: every room).
 // --geo lat,lng puts the floor plan on the real map with (0, 0) at that point, +x east and +y north;
 //   the phones check in by lat/lng as hand-placed pins. --gps N makes them GPS fixes off by ~N m instead.
+// --parallel sends every phone's report at once (like real phones) instead of one after another.
 // Clears any active incident first unless --keep is passed.
 
 import { ROOMS } from "../lib/floorplan";
@@ -36,7 +37,7 @@ function parseArgs() {
   const x = Number(positional[0]);
   const y = Number(positional[1]);
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    console.error("Usage: npx tsx scripts/simulate.ts <x> <y> [baseUrl] [--shots 3] [--move 4] [--keep] [--geo lat,lng [--gps 15]]");
+    console.error("Usage: npx tsx scripts/simulate.ts <x> <y> [baseUrl] [--shots 3] [--move 4] [--keep] [--parallel] [--geo lat,lng [--gps 15]]");
     process.exit(1);
   }
   const [lat, lng] = typeof flags.geo === "string" ? flags.geo.split(",").map(Number) : [];
@@ -51,6 +52,7 @@ function parseArgs() {
     shots: Number(flags.shots ?? 1),
     move: Number(flags.move ?? 0),
     keep: flags.keep === true,
+    parallel: flags.parallel === true,
     rooms: typeof flags.rooms === "string" ? flags.rooms.split(",").map((r) => r.trim()) : null,
     anchor: flags.geo ? ({ lat, lng } as LatLng) : null,
     gpsErrorM: Number(flags.gps ?? 0),
@@ -87,7 +89,7 @@ async function syncClock(baseUrl: string, localNow: () => number): Promise<{ rtt
 }
 
 async function main() {
-  const { x, y, baseUrl, shots, move, keep, rooms, anchor, gpsErrorM } = parseArgs();
+  const { x, y, baseUrl, shots, move, keep, parallel, rooms, anchor, gpsErrorM } = parseArgs();
   const unknown = rooms?.filter((id) => !ROOMS.some((r) => r.id === id)) ?? [];
   if (unknown.length) {
     console.error(`Unknown room(s): ${unknown.join(", ")}. Valid: ${ROOMS.map((r) => r.id).join(", ")}`);
@@ -147,8 +149,23 @@ async function main() {
     // Send in arrival order, like real phones would.
     reports.sort((a, b) => a.trueTs - b.trueTs);
     type Estimate = { x: number; y: number; lat: number | null; lng: number | null; label: string | null; deviceCount: number };
-    let last: { incidentId: string; estimate: Estimate } | null = null;
-    for (const { trueTs: _, ...body } of reports) last = await post(baseUrl, "/api/detection", body);
+    type Result = { incidentId: string; estimate: Estimate; pending?: boolean };
+    let last: Result | null = null;
+    let searchNote = "";
+    if (parallel) {
+      // All at once. Requests that found a search already running return pending; the one running it
+      // includes their reports before it responds, so once all have returned the incident is final.
+      const results = await Promise.all(reports.map(({ trueTs: _, ...body }) => post<Result>(baseUrl, "/api/detection", body)));
+      const ran = results.filter((r) => !r.pending).length;
+      searchNote = `  (${ran} of ${results.length} requests ran the search)`;
+      const inc = await (await fetch(`${baseUrl}/api/incidents/current`)).json();
+      last = {
+        incidentId: inc.id,
+        estimate: { x: inc.best_x, y: inc.best_y, lat: inc.best_lat, lng: inc.best_lng, label: inc.best_label, deviceCount: results.length },
+      };
+    } else {
+      for (const { trueTs: _, ...body } of reports) last = await post<Result>(baseUrl, "/api/detection", body);
+    }
 
     const e = last!.estimate;
     // On the real map the server's x/y are relative to the incident's first phone, so compare via lat/lng.
@@ -157,7 +174,7 @@ async function main() {
     const at = anchor ? ` = ${e.lat!.toFixed(6)}, ${e.lng!.toFixed(6)}` : "";
     console.log(
       `Shot ${s + 1}: true (${sx.toFixed(1)}, ${sy.toFixed(1)})  estimate (${found.x.toFixed(1)}, ${found.y.toFixed(1)})${at}` +
-        `  near ${e.label}  error ${err.toFixed(2)} m  [${e.deviceCount} devices]`,
+        `  near ${e.label}  error ${err.toFixed(2)} m  [${e.deviceCount} devices]${searchNote}`,
     );
     if (s === shots - 1) console.log(`\nIncident ${last!.incidentId}`);
   }

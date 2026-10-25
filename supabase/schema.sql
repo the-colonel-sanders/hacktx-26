@@ -132,6 +132,32 @@ alter table timing_cal_reports
   alter column x drop not null,
   alter column y drop not null;
 
+-- Localization runs once per batch of new detections, not once per detection (lib/localizeIncident.ts):
+-- a request takes a short lease on the incident, then processes every detection newer than loc_done_at.
+alter table incidents
+  add column if not exists loc_lease_until timestamptz,
+  add column if not exists loc_done_at     timestamptz;
+
+-- The heatmap (tens of KB) lives here, not on incidents: phones subscribe to incident changes over
+-- Realtime and would otherwise receive the whole heatmap on every update. Not in the publication.
+create table if not exists incident_heatmaps (
+  incident_id uuid primary key references incidents(id) on delete cascade,
+  heatmap     jsonb not null,
+  updated_at  timestamptz not null default now()
+);
+
+-- Phone settings, set from the incident dashboard (lib/phoneSettings.ts). A phone uses the built-in
+-- defaults, overridden by the all-phones settings (app_settings 'phone_defaults'), overridden by its own.
+alter table devices
+  add column if not exists settings             jsonb not null default '{}',
+  add column if not exists mic_cal_requested_at timestamptz,  -- dashboard asked this phone to calibrate its mic
+  add column if not exists gain_calibrated_at   timestamptz;
+create table if not exists app_settings (
+  key        text primary key,
+  value      jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 -- RLS: anon (publishable key) can only read rooms/incidents/alerts/statuses.
 -- All writes go through API routes using the secret key, which bypasses RLS.
 alter table rooms      enable row level security;
@@ -142,6 +168,8 @@ alter table alerts     enable row level security;
 alter table statuses   enable row level security;
 alter table timing_calibrations enable row level security;
 alter table timing_cal_reports  enable row level security;
+alter table incident_heatmaps   enable row level security;
+alter table app_settings        enable row level security;
 
 -- Explicit grants so this works with "Automatically expose new tables" turned off.
 revoke all on rooms, devices, incidents, detections, alerts, statuses from anon, authenticated;
@@ -149,6 +177,10 @@ grant select on rooms, incidents, alerts, statuses to anon;
 grant all on rooms, devices, incidents, detections, alerts, statuses to service_role;
 revoke all on timing_calibrations, timing_cal_reports from anon, authenticated;
 grant all on timing_calibrations, timing_cal_reports to service_role;
+revoke all on incident_heatmaps from anon, authenticated;
+grant all on incident_heatmaps to service_role;
+revoke all on app_settings from anon, authenticated;
+grant all on app_settings to service_role;
 
 drop policy if exists anon_read on rooms;
 drop policy if exists anon_read on incidents;

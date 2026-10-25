@@ -1,6 +1,8 @@
 // Phone → server calls. Everything uses one clock (`now`) so the clock offset
 // measured here applies exactly to the spike timestamps we send later.
 
+import type { PhoneSettings } from "@/lib/phoneSettings";
+
 export const now = () => performance.timeOrigin + performance.now();
 
 const DEVICE_KEY = "gunshot.deviceId";
@@ -121,7 +123,7 @@ export const sendDetection = (body: {
   peakDb: number;
   confidence: number;
   label: string;
-}) => post<{ incidentId: string; estimate: Estimate }>(
+}) => post<{ incidentId: string; estimate: Estimate; pending: boolean }>(
   "/api/detection",
   body,
 );
@@ -130,8 +132,8 @@ export const sendStatus = (deviceId: string, status: "safe" | "need_help" | "inj
   post("/api/status", { deviceId, status });
 
 export type Estimate = {
-  x: number;
-  y: number;
+  x: number | null; // null until the first shot has been localized
+  y: number | null;
   lat: number | null; // real map only
   lng: number | null;
   roomId: string | null; // floor plan only
@@ -159,3 +161,22 @@ export async function getTimingCal(): Promise<ActiveTimingCal> {
 
 export const reportTimingCal = (deviceId: string, localSpikeTsMs: number, peakDb: number) =>
   post<{ calibrationId: string; kept: string }>("/api/timing-cal/report", { deviceId, localSpikeTsMs, peakDb });
+
+export type RemoteSettings = { settings: PhoneSettings; micCalRequestedAt: string | null };
+
+/**
+ * What the dashboard has set for this phone. Before it has checked in, the ID from an earlier visit
+ * in this tab (if any) is used, else the all-phones settings.
+ */
+export async function getPhoneSettings(deviceId: string | null): Promise<RemoteSettings> {
+  let id = deviceId;
+  if (!id) {
+    try {
+      id = sessionStorage.getItem(DEVICE_KEY);
+    } catch {}
+  }
+  const res = await fetch(`/api/phones/settings${id ? `?deviceId=${id}` : ""}`, { cache: "no-store" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  return data;
+}

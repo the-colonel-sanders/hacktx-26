@@ -4,10 +4,18 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ROOMS, inBounds } from "@/lib/floorplan";
 import { CAL_MAX_ACCURACY_M, MAX_GPS_ACCURACY_M, PIN_ACCURACY_M } from "@/lib/geo";
+import {
+  DEFAULT_PHONE_SETTINGS,
+  LOCATION_MODE_NAMES,
+  TIMING_METHOD_NAMES,
+  type LocationMode,
+  type PhoneSettings,
+} from "@/lib/phoneSettings";
 import { browserDb } from "@/lib/supabaseBrowser";
 import {
   calibrate,
   checkIn,
+  getPhoneSettings,
   getTimingCal,
   now,
   reportTimingCal,
@@ -22,6 +30,7 @@ import { keepAwake, startListening, type AwakeStatus, type Level, type Spike, ty
 import { MIN_CONFIDENCE, classify } from "./detector";
 import type { GeoSpot } from "./GeoPicker";
 import { useGpsFix } from "./gps";
+import { startFollowing, type FollowInfo, type MapLocation } from "./follow";
 import PositionPicker from "./PositionPicker";
 import s from "./phone.module.css";
 
@@ -35,20 +44,7 @@ const TIMING_CAL_POLL_MS = 2_000;
 const POLL_MS = 10_000; // fallback in case Realtime drops
 const LOCATION_KEY = "gunshot.location";
 const TEST_WINDOW_MS = 10_000; // simulated shots in the same window (server clock) are one shot
-const LOCKDOWN_KEY = "gunshot.lockdownScreen";
-const TIMING_METHOD_KEY = "gunshot.timingMethod";
-const TIMING_METHODS: [TimingMethod, string, string][] = [
-  [
-    "output",
-    "Output timestamp",
-    "No jitter, but can be off by a constant amount (the browser's latency estimate) until timing calibration removes it. Best with calibration.",
-  ],
-  [
-    "current",
-    "Current time",
-    "No latency estimate involved, but each reading can be off by up to ~10 ms, and calibration can't remove that.",
-  ],
-];
+const SETTINGS_POLL_MS = 2_000; // settings are changed from the admin panel
 
 type Status = "safe" | "need_help" | "injured";
 type ActiveIncident = { id: string; best_room_id: string | null; best_label: string | null } | null;
@@ -66,6 +62,19 @@ const describe = ({ location, roomId }: CheckedIn) =>
 const whereYouAre = ({ location, roomId }: CheckedIn) =>
   "lat" in location ? (location.label ? `at ${location.label}` : null) : `${"x" in location ? "near" : "in"} ${roomName(roomId)}`;
 const incidentPlace = (i: NonNullable<ActiveIncident>) => i.best_label ?? roomName(i.best_room_id);
+const modeOf = (l: PhoneLocation): LocationMode => ("lat" in l ? "map" : "x" in l ? "spot" : "room");
+
+/** Admin-panel changes worth telling the person holding the phone about. */
+function settingChanges(a: PhoneSettings, b: PhoneSettings): string[] {
+  const out: string[] = [];
+  if (a.locationMode !== b.locationMode) out.push(`location set to ${LOCATION_MODE_NAMES[b.locationMode]}. Pick where this phone is.`);
+  if (a.timingMethod !== b.timingMethod) {
+    out.push(`timing method set to ${TIMING_METHOD_NAMES[b.timingMethod]}. Run timing calibration again.`);
+  }
+  if (a.lockdownScreen !== b.lockdownScreen) out.push(`lockdown screen turned ${b.lockdownScreen ? "on" : "off"}.`);
+  if (a.followLocation !== b.followLocation) out.push(`follow my location turned ${b.followLocation ? "on" : "off"}.`);
+  return out;
+}
 const estimateName = (e: Estimate) =>
   e.label ?? (e.lat != null && e.lng != null ? `${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : roomName(e.roomId));
 
@@ -82,11 +91,20 @@ function calibrationProblem({ location }: CheckedIn, cal: NonNullable<ActiveTimi
 }
 
 export default function PhonePage() {
-  const [mode, setMode] = useState<"room" | "spot" | "map">("room");
+  // Settings come from the admin panel (lib/phoneSettings.ts), including how this phone gives its location.
+  const [settings, setSettings] = useState<PhoneSettings>(DEFAULT_PHONE_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const settingsRef = useRef<PhoneSettings | null>(null);
+  const micCalSeenRef = useRef<string | null | undefined>(undefined);
+  const mode = settings.locationMode;
   const [roomId, setRoomId] = useState("");
   const [spot, setSpot] = useState<{ x: number; y: number } | null>(null);
   const [geoSpot, setGeoSpot] = useState<GeoSpot | null>(null);
   const [pinned, setPinned] = useState(false); // placed by hand rather than by GPS
+  // On the real map, while listening: GPS status from following the phone (when the admin panel has it on).
+  const [followInfo, setFollowInfo] = useState<FollowInfo>(null);
+  // Where the phone is checked in right now; following can change it after start().
+  const locationRef = useRef<PhoneLocation | null>(null);
   const [placeLabel, setPlaceLabel] = useState("");
   const [checkedIn, setCheckedIn] = useState<CheckedIn | null>(null);
   const [phase, setPhase] = useState<"setup" | "starting" | "listening">("setup");
@@ -99,12 +117,8 @@ export default function PhonePage() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [incident, setIncident] = useState<ActiveIncident>(null);
   const [myStatus, setMyStatus] = useState<Status | null>(null);
-  // Off while testing: alerts show as a banner instead of taking over the screen.
-  const [lockdownScreen, setLockdownScreen] = useState(false);
   // Incident whose lockdown screen was closed by hand; a new incident shows it again.
   const [dismissedIncident, setDismissedIncident] = useState<string | null>(null);
-  const [testDb, setTestDb] = useState(-15);
-  const [testDelayMs, setTestDelayMs] = useState(0);
   const [windowLeft, setWindowLeft] = useState(0);
 
   const deviceRef = useRef<string | null>(null);
@@ -113,14 +127,14 @@ export default function PhonePage() {
   const [timingCal, setTimingCal] = useState<ActiveTimingCal>(null);
   const timingCalRef = useRef<ActiveTimingCal>(null);
   // How spike times are converted to the wall clock; read at each spike, so it can change while listening.
-  const [timingMethod, setTimingMethod] = useState<TimingMethod>("output");
   const timingMethodRef = useRef<TimingMethod>("output");
   const cleanups = useRef<(() => void)[]>([]);
 
   const addLog = (text: string, tone?: LogEntry["tone"]) =>
     setLog((l) => [{ t: Date.now(), text, tone }, ...l].slice(0, 8));
 
-  // Location from the URL (?room=203 from a QR code, or ?x=7.5&y=2), else the last one used.
+  // Pre-fill the location from the URL (?room=203 from a QR code, or ?x=7.5&y=2), else the last one used.
+  // The admin panel decides which kind of location the phone gives; this only fills in the picker.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     let saved: { roomId?: string; x?: number; y?: number; lat?: number; lng?: number; accuracyM?: number; label?: string } = {};
@@ -132,48 +146,56 @@ export default function PhonePage() {
     const urlSpot = ux != null && uy != null ? { x: Number(ux), y: Number(uy) } : null;
     const room = q.get("room") ?? (urlSpot ? undefined : saved.roomId);
     const pt = urlSpot ?? (!room && saved.x != null && saved.y != null ? { x: saved.x, y: saved.y } : null);
-    if (room && ROOMS.some((r) => r.id === room)) {
-      setMode("room");
-      setRoomId(room);
-    } else if (pt && inBounds(pt.x, pt.y)) {
-      setMode("spot");
-      setSpot(pt);
-    } else if (!room && !urlSpot && saved.lat != null && saved.lng != null && saved.accuracyM != null) {
-      setMode("map");
+    if (room && ROOMS.some((r) => r.id === room)) setRoomId(room);
+    if (pt && inBounds(pt.x, pt.y)) setSpot(pt);
+    if (!room && !urlSpot && saved.lat != null && saved.lng != null && saved.accuracyM != null) {
       setGeoSpot({ lat: saved.lat, lng: saved.lng, accuracyM: saved.accuracyM });
       setPinned(saved.accuracyM <= PIN_ACCURACY_M);
       setPlaceLabel(saved.label ?? "");
     }
-    try {
-      setLockdownScreen(localStorage.getItem(LOCKDOWN_KEY) === "on");
-      if (localStorage.getItem(TIMING_METHOD_KEY) === "current") {
-        timingMethodRef.current = "current";
-        setTimingMethod("current");
-      }
-    } catch {}
   }, []);
 
-  const toggleLockdownScreen = (on: boolean) => {
-    setLockdownScreen(on);
-    try {
-      localStorage.setItem(LOCKDOWN_KEY, on ? "on" : "off");
-    } catch {}
-  };
-
-  const chooseTimingMethod = (m: TimingMethod) => {
-    if (m === timingMethodRef.current) return;
-    timingMethodRef.current = m;
-    setTimingMethod(m);
-    try {
-      localStorage.setItem(TIMING_METHOD_KEY, m);
-    } catch {}
-    addLog(`Timing method: ${TIMING_METHODS.find(([v]) => v === m)![1]}. Run timing calibration again.`);
-  };
+  // Follow the admin panel's settings for this phone. Changes apply within a couple of seconds.
+  useEffect(() => {
+    let stopped = false;
+    const check = async () => {
+      try {
+        const remote = await getPhoneSettings(deviceRef.current);
+        if (stopped) return;
+        const prev = settingsRef.current;
+        settingsRef.current = remote.settings;
+        setSettings(remote.settings);
+        timingMethodRef.current = remote.settings.timingMethod;
+        if (phase !== "listening" || !deviceRef.current) return;
+        if (prev) for (const change of settingChanges(prev, remote.settings)) addLog(`Admin: ${change}`);
+        // A mic calibration requested from the admin panel: wait for the next clap. Requests made before
+        // this phone started listening are ignored.
+        if (micCalSeenRef.current === undefined) micCalSeenRef.current = remote.micCalRequestedAt;
+        else if (remote.micCalRequestedAt && remote.micCalRequestedAt !== micCalSeenRef.current) {
+          micCalSeenRef.current = remote.micCalRequestedAt;
+          calibratingRef.current = true;
+          setCalibrating(true);
+          addLog("Admin: calibrate the mic. Clap once, sharply, about 1 m from this phone.");
+        }
+      } catch {
+        // Keep the last settings; the next poll tries again.
+      } finally {
+        if (!stopped) setSettingsLoaded(true);
+      }
+    };
+    check();
+    const t = setInterval(check, SETTINGS_POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(t);
+    };
+  }, [phase]);
 
   // Watch for alerts from page load, even before the mic is started.
   const refreshIncident = useCallback(async () => {
     try {
-      const res = await fetch("/api/incidents/current", { cache: "no-store" });
+      // The summary, not /api/incidents/current: phones don't need the heatmap or detections.
+      const res = await fetch("/api/incidents/summary", { cache: "no-store" });
       const data = await res.json();
       setIncident(res.ok && data ? { id: data.id, best_room_id: data.best_room_id, best_label: data.best_label } : null);
     } catch {}
@@ -202,11 +224,41 @@ export default function PhonePage() {
   useEffect(() => {
     if (!incidentId) return;
     setMyStatus(null);
-    if (lockdownScreen) navigator.vibrate?.([400, 200, 400, 200, 400]);
+    if (settings.lockdownScreen) navigator.vibrate?.([400, 200, 400, 200, 400]);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only buzz when a new incident starts
   }, [incidentId]);
 
   useEffect(() => () => cleanups.current.forEach((f) => f()), []);
+
+  // Follow the phone on the real map while listening (when the admin panel has it on). Room / exact-spot phones can't:
+  // there's no indoor positioning to say where on the floor plan they went.
+  const followable = phase === "listening" && checkedIn != null && "lat" in checkedIn.location;
+  useEffect(() => {
+    if (!settings.followLocation || !followable) return;
+    return startFollowing({
+      current: () => locationRef.current as MapLocation,
+      onFix: setFollowInfo,
+      onMove: async (to, movedM, refine) => {
+        if (timingCalRef.current) return; // a move mid-calibration would be measured as fake delay
+        const res = await checkIn(to);
+        locationRef.current = to;
+        setCheckedIn({ location: to, roomId: res.roomId });
+        setSync(res.sync);
+        setGeoSpot(to);
+        setPinned(false);
+        try {
+          localStorage.setItem(LOCATION_KEY, JSON.stringify(to));
+        } catch {}
+        addLog(
+          refine
+            ? `Position refined by GPS (±${Math.round(to.accuracyM)} m)`
+            : `Moved about ${Math.round(movedM)} m: position updated (GPS ±${Math.round(to.accuracyM)} m)`,
+          "sent",
+        );
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only when the switch or listening state changes
+  }, [settings.followLocation, followable]);
 
   // Watch for a timing calibration while listening.
   useEffect(() => {
@@ -253,7 +305,7 @@ export default function PhonePage() {
         addLog(`Sound at ${spike.peakDb.toFixed(0)} dB ignored (confidence ${confidence})`, "muted");
         return;
       }
-      const { estimate } = await sendDetection({
+      const { estimate, pending } = await sendDetection({
         deviceId,
         localSpikeTsMs: spike.localSpikeTsMs,
         peakDb: spike.peakDb,
@@ -261,7 +313,7 @@ export default function PhonePage() {
         label,
       });
       addLog(
-        `Reported ${spike.peakDb.toFixed(0)} dB (confidence ${confidence}) → estimate ${estimateName(estimate)}, ${estimate.deviceCount} phone(s)`,
+        `Reported ${spike.peakDb.toFixed(0)} dB (confidence ${confidence}) → ${pending ? "estimate updating…" : `estimate ${estimateName(estimate)}`}, ${estimate.deviceCount} phone(s)`,
         "sent",
       );
     } catch (e) {
@@ -269,8 +321,11 @@ export default function PhonePage() {
     }
   }, []);
 
+  // The admin panel switched this phone to a different kind of location while it listens: it picks again.
+  const relocating = phase === "listening" && checkedIn != null && modeOf(checkedIn.location) !== mode;
+
   // On the real map, take the GPS fix until a pin is placed by hand; fixes rougher than MAX_GPS_ACCURACY_M need a pin.
-  const gps = useGpsFix(mode === "map" && !pinned && phase === "setup");
+  const gps = useGpsFix(mode === "map" && !pinned && (phase === "setup" || relocating));
   useEffect(() => {
     if (gps.fix && !pinned) setGeoSpot(gps.fix);
   }, [gps.fix, pinned]);
@@ -303,6 +358,7 @@ export default function PhonePage() {
       cleanups.current.push(await keepAwake(setAwake));
 
       const res = await checkIn(location);
+      locationRef.current = location;
       const me: CheckedIn = { location, roomId: res.roomId };
       deviceRef.current = res.deviceId;
       setDeviceId(res.deviceId);
@@ -311,7 +367,7 @@ export default function PhonePage() {
 
       const resync = setInterval(async () => {
         try {
-          setSync((await checkIn(location)).sync);
+          setSync((await checkIn(locationRef.current ?? location)).sync);
         } catch {}
       }, RESYNC_MS);
       cleanups.current.push(() => clearInterval(resync));
@@ -333,14 +389,33 @@ export default function PhonePage() {
     }
   };
 
+  // Check in again with the newly picked location; the phone keeps listening.
+  const relocate = async () => {
+    if (!location) return;
+    try {
+      const res = await checkIn(location);
+      locationRef.current = location;
+      const me: CheckedIn = { location, roomId: res.roomId };
+      setCheckedIn(me);
+      setSync(res.sync);
+      try {
+        localStorage.setItem(LOCATION_KEY, JSON.stringify(location));
+      } catch {}
+      addLog(`Checked in: ${describe(me)}`, "sent");
+    } catch (e) {
+      addLog(`Failed to check in: ${(e as Error).message}`, "error");
+    }
+  };
+
   // Testing: report a shot as if this phone just heard one, bypassing the mic and classifier.
   // The shot "fires" at the start of the current shared window (server clock), and this phone
-  // hears it testDelayMs later — so phones tapping in the same window report the same shot.
+  // hears it simulateDelayMs later — so phones tapping in the same window report the same shot.
   const simulateShot = async () => {
     if (!deviceId || !sync) return;
+    const { simulateDb: testDb, simulateDelayMs: testDelayMs } = settings;
     try {
       const fireServerMs = Math.floor((now() + sync.offsetMs) / TEST_WINDOW_MS) * TEST_WINDOW_MS;
-      const { estimate } = await sendDetection({
+      const { estimate, pending } = await sendDetection({
         deviceId,
         localSpikeTsMs: fireServerMs - sync.offsetMs + testDelayMs,
         peakDb: testDb,
@@ -348,7 +423,7 @@ export default function PhonePage() {
         label: "test shot",
       });
       addLog(
-        `Simulated: ${testDb} dB, heard +${testDelayMs} ms → estimate ${estimateName(estimate)}, ${estimate.deviceCount} phone(s)`,
+        `Simulated: ${testDb} dB, heard +${testDelayMs} ms → ${pending ? "estimate updating…" : `estimate ${estimateName(estimate)}`}, ${estimate.deviceCount} phone(s)`,
         "sent",
       );
     } catch (e) {
@@ -367,7 +442,89 @@ export default function PhonePage() {
     }
   };
 
-  if (incident && lockdownScreen && dismissedIncident !== incident.id) {
+  // The location picker for the mode the admin panel set; used to start, and to re-pick after the mode changes.
+  const picker =
+    mode === "room" ? (
+      <select aria-label="Room" className={s.select} value={roomId} onChange={(e) => setRoomId(e.target.value)}>
+        <option value="">Choose a room…</option>
+        {ROOMS.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.name}
+          </option>
+        ))}
+      </select>
+    ) : mode === "spot" ? (
+      <>
+        <PositionPicker value={spot} onChange={setSpot} />
+        <div className={s.xy}>
+          <label>
+            x (m)
+            <input
+              type="number"
+              inputMode="decimal"
+              step={0.5}
+              value={spot?.x ?? ""}
+              onChange={(e) => setSpot({ x: Number(e.target.value), y: spot?.y ?? 0 })}
+            />
+          </label>
+          <label>
+            y (m)
+            <input
+              type="number"
+              inputMode="decimal"
+              step={0.5}
+              value={spot?.y ?? ""}
+              onChange={(e) => setSpot({ x: spot?.x ?? 0, y: Number(e.target.value) })}
+            />
+          </label>
+        </div>
+        <p className={s.hint}>Tap the map or type coordinates. Squares are room centers. The floor runs x −3 to 30 m, y −4 to 8 m.</p>
+        {spot && !inBounds(spot.x, spot.y) && <p className={s.error}>That spot is outside the floor plan.</p>}
+      </>
+    ) : (
+      <>
+        <GeoPicker
+          value={geoSpot}
+          onChange={(p) => {
+            setGeoSpot({ ...p, accuracyM: PIN_ACCURACY_M });
+            setPinned(true);
+          }}
+          follow={!pinned}
+        />
+        <p className={s.hint}>
+          {pinned ? (
+            <>
+              Placed by hand (±{PIN_ACCURACY_M} m). Drag the pin to adjust, or{" "}
+              <button className={s.linkBtn} onClick={() => setPinned(false)}>
+                use GPS again
+              </button>
+              .
+            </>
+          ) : !geoSpot ? (
+            "Finding your location… or tap the map where this phone is."
+          ) : geoSpot.accuracyM > 10 ? (
+            `GPS says ±${Math.round(geoSpot.accuracyM)} m, which is rough. Drag the pin to exactly where this phone is: every meter of error moves the shot estimate too.`
+          ) : (
+            `GPS says ±${Math.round(geoSpot.accuracyM)} m. Drag the pin if it's off.`
+          )}
+        </p>
+        {gps.error && !pinned && <p className={s.error}>{gps.error}</p>}
+        {geoSpot && geoSpot.accuracyM > MAX_GPS_ACCURACY_M && (
+          <p className={s.error}>That fix is too rough to use. Tap the map where this phone is.</p>
+        )}
+        <label className={s.field}>
+          Label (optional)
+          <input
+            value={placeLabel}
+            maxLength={60}
+            placeholder="e.g. Room 214, 2nd floor"
+            onChange={(e) => setPlaceLabel(e.target.value)}
+          />
+        </label>
+      </>
+    );
+
+  if (incident && settings.lockdownScreen && dismissedIncident !== incident.id) {
     return (
       <main className={s.alert}>
         <div className={s.alertInner}>
@@ -424,7 +581,7 @@ export default function PhonePage() {
       {incident && (
         <p className={s.banner}>
           <b>Alert active</b> · shots near {incidentPlace(incident)}.{" "}
-          {lockdownScreen ? (
+          {settings.lockdownScreen ? (
             <button className={s.linkBtn} onClick={() => setDismissedIncident(null)}>
               Show lockdown screen
             </button>
@@ -436,98 +593,10 @@ export default function PhonePage() {
 
       {phase !== "listening" ? (
         <section className={s.card}>
-          <span className={s.label}>Where is this phone?</span>
-          <div className={s.segmented} role="tablist">
-            <button role="tab" aria-selected={mode === "room"} className={mode === "room" ? s.segOn : ""} onClick={() => setMode("room")}>
-              Room
-            </button>
-            <button role="tab" aria-selected={mode === "spot"} className={mode === "spot" ? s.segOn : ""} onClick={() => setMode("spot")}>
-              Exact spot
-            </button>
-            <button role="tab" aria-selected={mode === "map"} className={mode === "map" ? s.segOn : ""} onClick={() => setMode("map")}>
-              Real map
-            </button>
-          </div>
-
-          {mode === "room" ? (
-            <select aria-label="Room" className={s.select} value={roomId} onChange={(e) => setRoomId(e.target.value)}>
-              <option value="">Choose a room…</option>
-              {ROOMS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          ) : mode === "spot" ? (
-            <>
-              <PositionPicker value={spot} onChange={setSpot} />
-              <div className={s.xy}>
-                <label>
-                  x (m)
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step={0.5}
-                    value={spot?.x ?? ""}
-                    onChange={(e) => setSpot({ x: Number(e.target.value), y: spot?.y ?? 0 })}
-                  />
-                </label>
-                <label>
-                  y (m)
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step={0.5}
-                    value={spot?.y ?? ""}
-                    onChange={(e) => setSpot({ x: spot?.x ?? 0, y: Number(e.target.value) })}
-                  />
-                </label>
-              </div>
-              <p className={s.hint}>Tap the map or type coordinates. Squares are room centers. The floor runs x −3 to 30 m, y −4 to 8 m.</p>
-              {spot && !inBounds(spot.x, spot.y) && <p className={s.error}>That spot is outside the floor plan.</p>}
-            </>
-          ) : (
-            <>
-              <GeoPicker
-                value={geoSpot}
-                onChange={(p) => {
-                  setGeoSpot({ ...p, accuracyM: PIN_ACCURACY_M });
-                  setPinned(true);
-                }}
-                follow={!pinned}
-              />
-              <p className={s.hint}>
-                {pinned ? (
-                  <>
-                    Placed by hand (±{PIN_ACCURACY_M} m). Drag the pin to adjust, or{" "}
-                    <button className={s.linkBtn} onClick={() => setPinned(false)}>
-                      use GPS again
-                    </button>
-                    .
-                  </>
-                ) : !geoSpot ? (
-                  "Finding your location… or tap the map where this phone is."
-                ) : geoSpot.accuracyM > 10 ? (
-                  `GPS says ±${Math.round(geoSpot.accuracyM)} m, which is rough. Drag the pin to exactly where this phone is: every meter of error moves the shot estimate too.`
-                ) : (
-                  `GPS says ±${Math.round(geoSpot.accuracyM)} m. Drag the pin if it's off.`
-                )}
-              </p>
-              {gps.error && !pinned && <p className={s.error}>{gps.error}</p>}
-              {geoSpot && geoSpot.accuracyM > MAX_GPS_ACCURACY_M && (
-                <p className={s.error}>That fix is too rough to use. Tap the map where this phone is.</p>
-              )}
-              <label className={s.field}>
-                Label (optional)
-                <input
-                  value={placeLabel}
-                  maxLength={60}
-                  placeholder="e.g. Room 214, 2nd floor"
-                  onChange={(e) => setPlaceLabel(e.target.value)}
-                />
-              </label>
-            </>
-          )}
+          <span className={s.label}>
+            Where is this phone?{settingsLoaded && ` · ${LOCATION_MODE_NAMES[mode]}`}
+          </span>
+          {settingsLoaded ? picker : <p className={s.hint}>Loading…</p>}
 
           <button className={s.primary} onClick={start} disabled={!location || phase === "starting"}>
             {phase === "starting" ? "Starting…" : "Start listening"}
@@ -546,6 +615,22 @@ export default function PhonePage() {
             </div>
             <Meter level={level} />
             <dl className={s.facts}>
+              <dt>Lockdown screen</dt>
+              <dd>{settings.lockdownScreen ? "On" : "Off"}</dd>
+              <dt>Timing</dt>
+              <dd>{TIMING_METHOD_NAMES[settings.timingMethod]}</dd>
+              {checkedIn && "lat" in checkedIn.location && (
+                <>
+                  <dt>Follow location</dt>
+                  <dd>
+                    {!settings.followLocation
+                      ? "Off"
+                      : followInfo
+                        ? `On · GPS ±${Math.round(followInfo.lastFixAccuracyM)} m, ${Math.round(followInfo.movedM)} m from spot`
+                        : "On · waiting for GPS…"}
+                  </dd>
+                </>
+              )}
               <dt>Clock offset</dt>
               <dd>{sync ? `${sync.offsetMs.toFixed(0)} ms (±${(sync.rttMs / 2).toFixed(0)} ms)` : "—"}</dd>
               <dt>Device</dt>
@@ -562,18 +647,22 @@ export default function PhonePage() {
                 Never in Settings while testing.
               </p>
             )}
+            <p className={s.hint}>Settings for this phone are changed in the admin panel.</p>
           </section>
 
-          <section className={s.card}>
-            <label className={s.toggle}>
-              <input type="checkbox" checked={lockdownScreen} onChange={(e) => toggleLockdownScreen(e.target.checked)} />
-              <span>
-                <b>Lockdown screen</b>
-                <br />
-                <span className={s.hint}>Take over the screen and vibrate when an alert is raised. Leave off while testing.</span>
-              </span>
-            </label>
-          </section>
+          {relocating && (
+            <section className={s.card}>
+              <h2 className={s.h2}>Pick this phone&apos;s location again</h2>
+              <p className={s.hint}>
+                The admin panel switched this phone to <b>{LOCATION_MODE_NAMES[mode]}</b>. Until you check in, it keeps
+                reporting from {describe(checkedIn!)}.
+              </p>
+              {picker}
+              <button className={s.primary} onClick={relocate} disabled={!location}>
+                Check in here
+              </button>
+            </section>
+          )}
 
           {timingCal && (
             <p className={s.calBanner}>
@@ -586,73 +675,34 @@ export default function PhonePage() {
             </p>
           )}
 
-          <section className={s.card}>
-            <h2 className={s.h2}>Simulate a shot (testing)</h2>
-            <p className={s.hint}>
-              Reports a gunshot as if this phone heard it. Phones that tap during the same 10-second window report the
-              same shot; the delay is how long after the shot this phone heard it.
+          {calibrating && (
+            <p className={s.calBanner}>
+              <b>Calibrating the microphone.</b> Hold the phone about 1 m away and clap once, sharply.{" "}
+              <button
+                className={s.linkBtn}
+                onClick={() => {
+                  calibratingRef.current = false;
+                  setCalibrating(false);
+                }}
+              >
+                Cancel
+              </button>
             </p>
-            <div className={s.xy}>
-              <label>
-                Loudness (dB)
-                <input type="number" inputMode="decimal" step={0.5} max={0} value={testDb} onChange={(e) => setTestDb(Number(e.target.value))} />
-              </label>
-              <label>
-                Heard after (ms)
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step={1}
-                  min={0}
-                  max={250}
-                  value={testDelayMs}
-                  onChange={(e) => setTestDelayMs(Math.min(250, Math.max(0, Number(e.target.value))))}
-                />
-              </label>
-            </div>
-            <p className={s.hint}>
-              Closer to 0 dB = louder (e.g. −5 right next to it, −30 far away). Sound travels about 1 m per 3 ms.
-              Window ends in {Math.ceil(windowLeft / 1000)} s.
-            </p>
-            <button className={s.danger} onClick={simulateShot} disabled={!sync}>
-              Simulate shot
-            </button>
-          </section>
+          )}
 
-          <section className={s.card}>
-            <h2 className={s.h2}>Timing method</h2>
-            <div className={s.segmented} role="tablist" aria-label="Timing method">
-              {TIMING_METHODS.map(([value, name]) => (
-                <button
-                  key={value}
-                  role="tab"
-                  aria-selected={timingMethod === value}
-                  className={timingMethod === value ? s.segOn : ""}
-                  onClick={() => chooseTimingMethod(value)}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-            <p className={s.hint}>
-              {TIMING_METHODS.find(([v]) => v === timingMethod)![2]} Switching changes this phone&apos;s timing, so run
-              timing calibration again afterwards.
-            </p>
-          </section>
-
-          <section className={s.card}>
-            <h2 className={s.h2}>Calibrate microphone</h2>
-            <p className={s.hint}>Hold the phone about 1 m away and clap once, sharply. Do this once per phone.</p>
-            <button
-              className={s.secondary}
-              onClick={() => {
-                calibratingRef.current = !calibrating;
-                setCalibrating(!calibrating);
-              }}
-            >
-              {calibrating ? "Waiting for clap… (tap to cancel)" : "Calibrate"}
-            </button>
-          </section>
+          {settings.showSimulate && (
+            <section className={s.card}>
+              <h2 className={s.h2}>Simulate a shot (testing)</h2>
+              <p className={s.hint}>
+                Reports a gunshot as if this phone heard it, at {settings.simulateDb} dB, {settings.simulateDelayMs} ms
+                after the shot (set in the admin panel). Phones that tap during the same 10-second window report the same
+                shot. Window ends in {Math.ceil(windowLeft / 1000)} s.
+              </p>
+              <button className={s.danger} onClick={simulateShot} disabled={!sync}>
+                Simulate shot
+              </button>
+            </section>
+          )}
 
           <section className={s.card}>
             <h2 className={s.h2}>Activity</h2>
