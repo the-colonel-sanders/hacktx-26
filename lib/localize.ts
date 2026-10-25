@@ -64,8 +64,9 @@ export function cellCost(cx: number, cy: number, obs: Observation[]): number {
   // Loudness: L_i = L0 − 20·log10(d_i), with L0 fit as the weighted mean over unclipped phones.
   // A clipped phone only says the sound was at least that loud, so it counts only when the model predicts quieter.
   // Position error σ_p shifts 20·log10(d) by ≈ 8.7·σ_p/d dB, so a phone's loudness error grows close up
-  // (capped at d = σ_p, where the linear estimate breaks down). Since that σ differs per cell, the cost
-  // includes its ln σ² term (relative to LOUD_SIGMA_DB, so exact positions add nothing).
+  // (capped at d = σ_p, where the linear estimate breaks down). There's deliberately no ln σ² term for that
+  // per-cell σ: it pushed estimates away from phones placed by room center or GPS, and simulations localized
+  // better without it.
   const loudVar = new Array<number>(n);
   let l0 = 0;
   let l0w = 0;
@@ -82,9 +83,7 @@ export function cellCost(cx: number, cy: number, obs: Observation[]): number {
     l0 /= l0w;
     for (let i = 0; i < n; i++) {
       const r = obs[i].normPeakDb - (l0 - logD[i]);
-      if (!obs[i].clipped || r > 0) {
-        loudCost += (r * r) / loudVar[i] + Math.log(loudVar[i] / (LOUD_SIGMA_DB * LOUD_SIGMA_DB));
-      }
+      if (!obs[i].clipped || r > 0) loudCost += (r * r) / loudVar[i];
     }
   }
 

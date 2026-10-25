@@ -9,6 +9,12 @@ export function fail(error: string, status = 400) {
   return json({ error }, status);
 }
 
+/** A caught error as a response: its own `status` if it has one (e.g. an unknown demo space), else 500. */
+export function failFrom(e: unknown) {
+  const err = e as Error & { status?: number };
+  return fail(err.message, err.status ?? 500);
+}
+
 /** Parse + validate a JSON body. Returns the data, or a 400 response to return as-is. */
 export async function parseBody<T extends z.ZodType>(
   req: Request,

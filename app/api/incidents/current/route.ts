@@ -1,15 +1,17 @@
 import { positionOf, type Room } from "@/lib/floorplan";
-import { fail, json } from "@/lib/http";
+import { fail, failFrom, json } from "@/lib/http";
 import { getActiveIncident } from "@/lib/incidents";
+import { spaceFromRequest } from "@/lib/spaces";
 import { db } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 const ACTIVE_DEVICE_MS = 15 * 60_000; // phones re-check-in every 3 min
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const incident = await getActiveIncident();
+    const space = await spaceFromRequest(req);
+    const incident = await getActiveIncident(space.id);
     if (!incident) return json(null);
 
     const since = new Date(Date.now() - ACTIVE_DEVICE_MS).toISOString();
@@ -17,6 +19,7 @@ export async function GET() {
     let devicesQuery = db()
       .from("devices")
       .select("id, frame, room_id, x, y, lat, lng, pos_accuracy_m, place_label")
+      .eq("space_id", space.id)
       .gte("last_seen", since);
     if (incident.frame) devicesQuery = devicesQuery.eq("frame", incident.frame);
     const [
@@ -33,6 +36,7 @@ export async function GET() {
       db()
         .from("statuses")
         .select("device_id, status, updated_at, devices(frame, room_id, x, y, lat, lng, place_label)")
+        .eq("space_id", space.id)
         .gte("updated_at", incident.started_at)
         .order("updated_at", { ascending: false }),
       db().from("incident_heatmaps").select("heatmap").eq("incident_id", incident.id).maybeSingle(),
@@ -83,6 +87,6 @@ export async function GET() {
       statuses: statusRows,
     });
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

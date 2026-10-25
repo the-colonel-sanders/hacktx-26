@@ -33,8 +33,7 @@ create table if not exists incidents (
   summary         text
 );
 
--- At most one active incident at a time.
-create unique index if not exists incidents_one_active on incidents (status) where status = 'active';
+-- At most one active incident per demo space: see "Demo spaces" below.
 
 create table if not exists detections (
   id           uuid primary key default gen_random_uuid(),
@@ -106,7 +105,6 @@ create table if not exists timing_calibrations (
   finished_at timestamptz,
   results     jsonb
 );
-create unique index if not exists timing_calibrations_one_active on timing_calibrations (status) where status = 'listening';
 
 create table if not exists timing_cal_reports (
   calibration_id uuid not null references timing_calibrations(id) on delete cascade,
@@ -158,6 +156,32 @@ create table if not exists app_settings (
   updated_at timestamptz not null default now()
 );
 
+-- Demo spaces: separate sandboxes (e.g. one per judge) with their own phones, incidents, alerts,
+-- status reports, timing calibration and phone settings. Joined with a short code (/join/K7Q2).
+-- Everything that existed before spaces belongs to the shared "DEMO" space, which is also where
+-- requests without a space go.
+create table if not exists spaces (
+  id             uuid primary key default gen_random_uuid(),
+  code           text not null unique,
+  name           text,
+  created_at     timestamptz not null default now(),
+  last_active_at timestamptz not null default now()
+);
+insert into spaces (id, code, name) values ('00000000-0000-4000-8000-000000000000', 'DEMO', 'Shared demo')
+  on conflict (id) do nothing;
+
+alter table devices             add column if not exists space_id uuid not null default '00000000-0000-4000-8000-000000000000' references spaces(id) on delete cascade;
+alter table incidents           add column if not exists space_id uuid not null default '00000000-0000-4000-8000-000000000000' references spaces(id) on delete cascade;
+alter table alerts              add column if not exists space_id uuid not null default '00000000-0000-4000-8000-000000000000' references spaces(id) on delete cascade;
+alter table statuses            add column if not exists space_id uuid not null default '00000000-0000-4000-8000-000000000000' references spaces(id) on delete cascade;
+alter table timing_calibrations add column if not exists space_id uuid not null default '00000000-0000-4000-8000-000000000000' references spaces(id) on delete cascade;
+
+drop index if exists incidents_one_active;
+drop index if exists timing_calibrations_one_active;
+create unique index if not exists incidents_one_active_per_space on incidents (space_id) where status = 'active';
+create unique index if not exists timing_cal_one_active_per_space on timing_calibrations (space_id) where status = 'listening';
+create index if not exists devices_space_seen on devices (space_id, last_seen);
+
 -- RLS: anon (publishable key) can only read rooms/incidents/alerts/statuses.
 -- All writes go through API routes using the secret key, which bypasses RLS.
 alter table rooms      enable row level security;
@@ -170,6 +194,7 @@ alter table timing_calibrations enable row level security;
 alter table timing_cal_reports  enable row level security;
 alter table incident_heatmaps   enable row level security;
 alter table app_settings        enable row level security;
+alter table spaces              enable row level security;
 
 -- Explicit grants so this works with "Automatically expose new tables" turned off.
 revoke all on rooms, devices, incidents, detections, alerts, statuses from anon, authenticated;
@@ -181,6 +206,8 @@ revoke all on incident_heatmaps from anon, authenticated;
 grant all on incident_heatmaps to service_role;
 revoke all on app_settings from anon, authenticated;
 grant all on app_settings to service_role;
+revoke all on spaces from anon, authenticated;
+grant all on spaces to service_role;
 
 drop policy if exists anon_read on rooms;
 drop policy if exists anon_read on incidents;

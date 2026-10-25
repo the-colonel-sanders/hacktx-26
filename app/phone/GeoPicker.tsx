@@ -13,19 +13,22 @@ export type GeoSpot = LatLng & { accuracyM: number };
 /**
  * Tap the map or drag the pin to set a spot on the real map; the circle shows how accurate it is.
  * With `follow`, the map recenters when the spot moves (a better GPS fix arriving).
+ * `center` is where to open when there's no spot yet (e.g. around the phones); it's read once, at mount.
  * Load with next/dynamic({ ssr: false }): Leaflet needs `window`.
  */
 export default function GeoPicker({
   value,
   onChange,
   follow = false,
+  center,
 }: {
   value: GeoSpot | null;
   onChange: (p: LatLng) => void;
   follow?: boolean;
+  center?: LatLng | null;
 }) {
   return (
-    <BaseMap center={value ?? DEFAULT_CENTER} zoom={value ? 19 : 16}>
+    <BaseMap center={value ?? center ?? DEFAULT_CENTER} zoom={value ? 19 : center ? 18 : 16}>
       <Pin value={value} onChange={onChange} follow={follow} />
     </BaseMap>
   );

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { fail, json, parseBody } from "@/lib/http";
+import { fail, failFrom, json, parseBody } from "@/lib/http";
 import { db } from "@/lib/supabase";
 
 const Body = z.object({ deviceId: z.uuid() });
@@ -19,6 +19,6 @@ export async function POST(req: Request) {
     if (!data.length) return fail("Unknown phone", 404);
     return json({ ok: true });
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

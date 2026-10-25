@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { fail, json, parseBody } from "@/lib/http";
+import { fail, failFrom, json, parseBody } from "@/lib/http";
 import { REFERENCE_DB } from "@/lib/localize";
 import { db } from "@/lib/supabase";
 
@@ -22,6 +22,6 @@ export async function POST(req: Request) {
 
     return json({ deviceId, gainOffsetDb });
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { fail, json, parseBody } from "@/lib/http";
+import { fail, failFrom, json, parseBody } from "@/lib/http";
 import { PhoneSettings, resolveSettings } from "@/lib/phoneSettings";
 import { applyToAllPhones, applyToPhone, getAllPhonesSettings } from "@/lib/phoneSettingsStore";
+import { spaceFromRequest } from "@/lib/spaces";
 import { db } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -10,19 +11,19 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const deviceId = new URL(req.url).searchParams.get("deviceId");
   try {
-    const [allPhones, device] = await Promise.all([
-      getAllPhonesSettings(),
+    const device =
       deviceId && z.uuid().safeParse(deviceId).success
-        ? db().from("devices").select("settings, mic_cal_requested_at").eq("id", deviceId).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-    ]);
+        ? await db().from("devices").select("settings, mic_cal_requested_at, space_id").eq("id", deviceId).maybeSingle()
+        : { data: null, error: null };
     if (device.error) throw device.error;
+    // A checked-in phone follows its own space's settings; before check-in, the space it's joining.
+    const allPhones = await getAllPhonesSettings(device.data?.space_id ?? (await spaceFromRequest(req)).id);
     return json({
       settings: resolveSettings(allPhones, device.data?.settings),
       micCalRequestedAt: device.data?.mic_cal_requested_at ?? null,
     });
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }
 
@@ -37,10 +38,10 @@ export async function POST(req: Request) {
   if ("response" in parsed) return parsed.response;
   const { target, patch } = parsed.data;
   try {
-    if (target === "all") await applyToAllPhones(patch);
+    if (target === "all") await applyToAllPhones((await spaceFromRequest(req)).id, patch);
     else if (!(await applyToPhone(target, patch))) return fail("Unknown phone", 404);
     return json({ ok: true });
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

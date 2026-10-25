@@ -27,8 +27,13 @@ export type TimingResult = {
   offsetMs: number;
 };
 
-export async function getActiveTimingCal(): Promise<TimingCalibration | null> {
-  const { data, error } = await db().from("timing_calibrations").select("*").eq("status", "listening").maybeSingle();
+export async function getActiveTimingCal(spaceId: string): Promise<TimingCalibration | null> {
+  const { data, error } = await db()
+    .from("timing_calibrations")
+    .select("*")
+    .eq("space_id", spaceId)
+    .eq("status", "listening")
+    .maybeSingle();
   if (error) throw error;
   return data;
 }

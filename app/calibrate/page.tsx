@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import { CAL_MAX_ACCURACY_M, type LatLng } from "@/lib/geo";
+import { LOCATION_MODE_NAMES, type LocationMode } from "@/lib/phoneSettings";
 import PositionPicker from "../phone/PositionPicker";
 import s from "./calibrate.module.css";
 
@@ -20,6 +21,7 @@ type Report = Where & { device_id: string; peak_db: number };
 type State = { active: Cal | null; reports: Report[]; last: Cal | null };
 
 const POLL_MS = 1000;
+const SETTINGS_POLL_MS = 5000; // follow Location mode changes made in /admin
 const where = (w: Where) =>
   w.lat != null && w.lng != null ? `${w.lat.toFixed(5)}, ${w.lng.toFixed(5)}` : `(${w.x}, ${w.y}) m`;
 
@@ -28,7 +30,10 @@ const GeoPicker = dynamic(() => import("../phone/GeoPicker"), { ssr: false, load
 
 export default function CalibratePage() {
   const [state, setState] = useState<State | null>(null);
-  const [onMap, setOnMap] = useState(false);
+  // Which map to show follows the space's Location mode setting (Admin → All phones).
+  const [mode, setMode] = useState<LocationMode | null>(null);
+  const [phonesCenter, setPhonesCenter] = useState<LatLng | null>(null);
+  const onMap = mode === "map";
   const [spot, setSpot] = useState<{ x: number; y: number } | null>(null);
   const [geoSpot, setGeoSpot] = useState<LatLng | null>(null);
   const reference = onMap ? geoSpot : spot;
@@ -51,6 +56,31 @@ export default function CalibratePage() {
     const t = setInterval(refresh, POLL_MS);
     return () => clearInterval(t);
   }, [refresh]);
+
+  useEffect(() => {
+    const loadMode = async () => {
+      try {
+        const [settings, phones] = await Promise.all([
+          fetch("/api/phones/settings", { cache: "no-store" }).then((r) => r.json()),
+          fetch("/api/phones", { cache: "no-store" }).then((r) => r.json()),
+        ]);
+        if (settings?.settings?.locationMode) setMode(settings.settings.locationMode);
+        // Open the real map over the phones that are on it: the middle of their pins.
+        const pins = ((phones?.phones ?? []) as { checkedIn: { lat: number | null; lng: number | null } }[])
+          .map((p) => p.checkedIn)
+          .filter((c): c is LatLng => c.lat != null && c.lng != null);
+        if (pins.length) {
+          setPhonesCenter({
+            lat: pins.reduce((a, p) => a + p.lat, 0) / pins.length,
+            lng: pins.reduce((a, p) => a + p.lng, 0) / pins.length,
+          });
+        }
+      } catch {}
+    };
+    loadMode();
+    const t = setInterval(loadMode, SETTINGS_POLL_MS);
+    return () => clearInterval(t);
+  }, []);
 
   const act = async (path: string, body?: unknown) => {
     setBusy(true);
@@ -86,12 +116,28 @@ export default function CalibratePage() {
       {!active ? (
         <section className={s.card}>
           <h2 className={s.h2}>1. Where will you make the sound?</h2>
-          <label className={s.hint}>
-            <input type="checkbox" checked={onMap} onChange={(e) => setOnMap(e.target.checked)} /> Phones are on the real
-            map (not the demo floor plan)
-          </label>
-          {onMap ? (
-            <GeoPicker value={geoSpot && { ...geoSpot, accuracyM: 1 }} onChange={setGeoSpot} />
+          {mode && (
+            <p className={s.hint}>
+              Showing the {onMap ? "real map" : "demo floor plan"}: phones in this space use{" "}
+              <b>{LOCATION_MODE_NAMES[mode]}</b> (change it in <a href="/admin">Admin</a>).
+            </p>
+          )}
+          {mode === "room" && (
+            <p className={s.error}>
+              Phones checked in by room can&apos;t take part: a room center can be meters from the phone, which would be
+              measured as fake delay. Set Location mode to Exact spot or Real map in Admin first.
+            </p>
+          )}
+          {mode == null ? (
+            <p className={s.hint}>Loading…</p>
+          ) : onMap ? (
+            // Keyed so it reopens over the phones once their positions arrive (the map reads its center once).
+            <GeoPicker
+              key={phonesCenter ? "phones" : "default"}
+              value={geoSpot && { ...geoSpot, accuracyM: 1 }}
+              onChange={setGeoSpot}
+              center={phonesCenter}
+            />
           ) : (
             <PositionPicker value={spot} onChange={setSpot} />
           )}

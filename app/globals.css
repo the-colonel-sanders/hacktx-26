@@ -67,3 +67,62 @@ body {
     display: none;
   }
 }
+
+.nav .spaceBadge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--heat);
+  color: var(--heat);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.nav .tryDemo {
+  background: var(--heat);
+  color: #fff;
+}
+
+.nav .tryDemo:hover {
+  color: #fff;
+  opacity: 0.9;
+}
+
+.spaceBanner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: center;
+  padding: 8px 16px;
+  background: var(--heat);
+  color: #fff;
+  font-size: 14px;
+}
+
+.spaceBanner a {
+  color: #fff;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.spaceBanner code {
+  font-family: ui-monospace, Consolas, monospace;
+  background: rgba(255, 255, 255, 0.18);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.spaceCode {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 18px;
+  letter-spacing: 0.12em;
+}
+
+.spaceName {
+  opacity: 0.85;
+}
+
+@media print {
+  .spaceBanner {
+    display: none;
+  }
+}

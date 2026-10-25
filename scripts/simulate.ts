@@ -9,6 +9,7 @@
 // --rooms limits the fake phones to those room ids (default: every room).
 // --geo lat,lng puts the floor plan on the real map with (0, 0) at that point, +x east and +y north;
 //   the phones check in by lat/lng as hand-placed pins. --gps N makes them GPS fixes off by ~N m instead.
+// --space CODE runs everything in that demo space (default: the shared one).
 // --parallel sends every phone's report at once (like real phones) instead of one after another.
 // Clears any active incident first unless --keep is passed.
 
@@ -53,6 +54,7 @@ function parseArgs() {
     move: Number(flags.move ?? 0),
     keep: flags.keep === true,
     parallel: flags.parallel === true,
+    space: typeof flags.space === "string" ? flags.space.toUpperCase() : null,
     rooms: typeof flags.rooms === "string" ? flags.rooms.split(",").map((r) => r.trim()) : null,
     anchor: flags.geo ? ({ lat, lng } as LatLng) : null,
     gpsErrorM: Number(flags.gps ?? 0),
@@ -62,10 +64,13 @@ function parseArgs() {
 const jitter = (amp: number) => (Math.random() * 2 - 1) * amp;
 const gauss = () => Math.sqrt(-2 * Math.log(Math.random() + 1e-12)) * Math.cos(2 * Math.PI * Math.random());
 
+// Set from --space: every request goes to that demo space.
+let spaceHeaders: Record<string, string> = {};
+
 async function post<T = unknown>(baseUrl: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(baseUrl + path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...spaceHeaders },
     body: JSON.stringify(body ?? {}),
   });
   const data = await res.json();
@@ -80,7 +85,7 @@ async function syncClock(baseUrl: string, localNow: () => number): Promise<{ rtt
   let best = { rtt: Infinity, offset: 0 };
   for (let i = 0; i < 5; i++) {
     const t0 = localNow();
-    const res = await fetch(`${baseUrl}/api/time`);
+    const res = await fetch(`${baseUrl}/api/time`, { headers: spaceHeaders });
     const { serverTime } = (await res.json()) as { serverTime: number };
     const t1 = localNow();
     if (t1 - t0 < best.rtt) best = { rtt: t1 - t0, offset: serverTime - (t0 + t1) / 2 };
@@ -89,7 +94,8 @@ async function syncClock(baseUrl: string, localNow: () => number): Promise<{ rtt
 }
 
 async function main() {
-  const { x, y, baseUrl, shots, move, keep, parallel, rooms, anchor, gpsErrorM } = parseArgs();
+  const { x, y, baseUrl, shots, move, keep, parallel, space, rooms, anchor, gpsErrorM } = parseArgs();
+  if (space) spaceHeaders = { "x-space": space };
   const unknown = rooms?.filter((id) => !ROOMS.some((r) => r.id === id)) ?? [];
   if (unknown.length) {
     console.error(`Unknown room(s): ${unknown.join(", ")}. Valid: ${ROOMS.map((r) => r.id).join(", ")}`);
@@ -122,7 +128,7 @@ async function main() {
     }),
   );
   console.log(
-    `Checked in ${phones.length} phones at ${baseUrl}` +
+    `Checked in ${phones.length} phones at ${baseUrl}${space ? ` in space ${space}` : ""}` +
       (anchor ? ` on the real map around ${anchor.lat}, ${anchor.lng}${gpsErrorM ? ` (GPS off by ~${gpsErrorM} m)` : ""}` : "") +
       "\n",
   );
@@ -158,7 +164,7 @@ async function main() {
       const results = await Promise.all(reports.map(({ trueTs: _, ...body }) => post<Result>(baseUrl, "/api/detection", body)));
       const ran = results.filter((r) => !r.pending).length;
       searchNote = `  (${ran} of ${results.length} requests ran the search)`;
-      const inc = await (await fetch(`${baseUrl}/api/incidents/current`)).json();
+      const inc = await (await fetch(`${baseUrl}/api/incidents/current`, { headers: spaceHeaders })).json();
       last = {
         incidentId: inc.id,
         estimate: { x: inc.best_x, y: inc.best_y, lat: inc.best_lat, lng: inc.best_lng, label: inc.best_label, deviceCount: results.length },

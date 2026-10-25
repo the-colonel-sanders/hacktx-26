@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { inBounds } from "@/lib/floorplan";
-import { fail, json, parseBody } from "@/lib/http";
+import { fail, failFrom, json, parseBody } from "@/lib/http";
+import { spaceFromRequest } from "@/lib/spaces";
 import { db } from "@/lib/supabase";
 
 // The reference spot: x/y on the floor plan, or lat/lng on the real map.
@@ -16,20 +17,25 @@ export async function POST(req: Request) {
   const spot = parsed.data;
 
   try {
+    const space = await spaceFromRequest(req);
     const { error: cancelErr } = await db()
       .from("timing_calibrations")
       .update({ status: "cancelled", finished_at: new Date().toISOString() })
+      .eq("space_id", space.id)
       .eq("status", "listening");
     if (cancelErr) throw cancelErr;
 
     const { data, error } = await db()
       .from("timing_calibrations")
-      .insert("lat" in spot ? { frame: "geo", lat: spot.lat, lng: spot.lng } : { frame: "grid", x: spot.x, y: spot.y })
+      .insert({
+        space_id: space.id,
+        ...("lat" in spot ? { frame: "geo", lat: spot.lat, lng: spot.lng } : { frame: "grid", x: spot.x, y: spot.y }),
+      })
       .select("*")
       .single();
     if (error) throw error;
     return json(data);
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

@@ -34,8 +34,14 @@ const frameRow = (init: FrameInit | undefined) =>
       ? { frame: "geo", origin_lat: init.origin.lat, origin_lng: init.origin.lng }
       : { frame: "grid" };
 
-export async function getActiveIncident(): Promise<Incident | null> {
-  const { data, error } = await db().from("incidents").select("*").eq("status", "active").maybeSingle();
+/** The demo space's active incident (each space has at most one). */
+export async function getActiveIncident(spaceId: string): Promise<Incident | null> {
+  const { data, error } = await db()
+    .from("incidents")
+    .select("*")
+    .eq("space_id", spaceId)
+    .eq("status", "active")
+    .maybeSingle();
   if (error) throw error;
   return data;
 }
@@ -46,32 +52,35 @@ export async function getActiveIncident(): Promise<Incident | null> {
  * lose the race with 23505 and just re-read the winner's row.
  * With `init`, an incident that has no frame yet takes this one (first detection wins).
  */
-export async function getOrCreateActiveIncident(init?: FrameInit): Promise<{ incident: Incident; created: boolean }> {
-  const existing = await getActiveIncident();
-  if (existing) return { incident: await claimFrame(existing, init), created: false };
+export async function getOrCreateActiveIncident(
+  spaceId: string,
+  init?: FrameInit,
+): Promise<{ incident: Incident; created: boolean }> {
+  const existing = await getActiveIncident(spaceId);
+  if (existing) return { incident: await claimFrame(spaceId, existing, init), created: false };
 
   const { data, error } = await db()
     .from("incidents")
-    .insert({ status: "active", ...frameRow(init) })
+    .insert({ status: "active", space_id: spaceId, ...frameRow(init) })
     .select("*")
     .single();
   if (error) {
     if (error.code === "23505") {
-      const winner = await getActiveIncident();
-      if (winner) return { incident: await claimFrame(winner, init), created: false };
+      const winner = await getActiveIncident(spaceId);
+      if (winner) return { incident: await claimFrame(spaceId, winner, init), created: false };
     }
     throw error;
   }
 
-  const { error: alertErr } = await db().from("alerts").insert({ incident_id: data.id, type: "alert" });
+  const { error: alertErr } = await db().from("alerts").insert({ incident_id: data.id, space_id: spaceId, type: "alert" });
   if (alertErr) throw alertErr;
   return { incident: data, created: true };
 }
 
-async function claimFrame(incident: Incident, init: FrameInit | undefined): Promise<Incident> {
+async function claimFrame(spaceId: string, incident: Incident, init: FrameInit | undefined): Promise<Incident> {
   if (incident.frame || !init) return incident;
   // Only if still unset, so two first detections can't both claim it.
   const { error } = await db().from("incidents").update(frameRow(init)).eq("id", incident.id).is("frame", null);
   if (error) throw error;
-  return (await getActiveIncident()) ?? incident;
+  return (await getActiveIncident(spaceId)) ?? incident;
 }

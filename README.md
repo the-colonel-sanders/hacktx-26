@@ -10,6 +10,8 @@
 
 [How it works](#how-it-works) · [Run locally](#getting-started) · [Demo](#testing-and-demonstration) · [API](#api-reference)
 
+**Judges: start with [DEMO.md](DEMO.md)**, a step-by-step guide to running it with three listeners on one laptop or a real phone.
+
 </div>
 
 > [!IMPORTANT]
@@ -240,6 +242,7 @@ Additional flags documented by the current script:
 | `--move 4` | Move the simulated source 4 m along X between events |
 | `--rooms 202,204` | Limit the synthetic sensor set |
 | `--keep` | Preserve an existing incident instead of clearing it first |
+| `--space K7Q2` | Run in that demo space instead of the shared one |
 | `--parallel` | Send every phone's report at the same instant, like real phones (exercises batched localization) |
 | `--geo 30.2849,-97.7341` | Put the simulated phones on the real map around that point (X = meters east, Y = meters north), as hand-placed pins |
 | `--gps 15` | With `--geo`: place the phones by simulated GPS, about 15 m off, instead of by pin |
@@ -282,6 +285,16 @@ The import path above assumes the current helper is `location/src/static_locatio
 This function can be called from a **client-side** Next.js component. It cannot run directly in a Node.js server function or standalone Python script.
 
 The `/phone` page uses its own watcher (`app/phone/gps.ts`), which keeps the most accurate fix and its accuracy radius. GPS returns an estimate, **not an exact physical position**.
+
+## Demo spaces
+
+Several people can demo at once without interfering: each **demo space** has its own phones, incident, alerts, status reports, timing calibration and phone settings.
+
+- Open **`/spaces`** and press **Create space**. You get a 4-character code (e.g. `K7Q2`) and a QR code for phones.
+- Phones join by scanning it or opening **`/join/K7Q2`** (add `?to=incident`, `admin`, `calibrate` or `spaces` to land elsewhere; `&room=203` also works). The space is remembered in that browser.
+- The nav bar shows which space you're in. **Leave space** goes back to the **shared demo space**, where everything without a code lands (including all data from before spaces existed).
+- Scripts pick a space with an `x-space: K7Q2` header or `?space=K7Q2`; the simulator takes `--space K7Q2`.
+- A phone always reports into the space it checked in to.
 
 ## API reference
 

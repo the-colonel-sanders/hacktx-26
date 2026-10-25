@@ -1,13 +1,14 @@
 import { toLocal } from "@/lib/geo";
-import { fail, json } from "@/lib/http";
+import { fail, failFrom, json } from "@/lib/http";
 import { timingBiases } from "@/lib/localize";
 import { db } from "@/lib/supabase";
+import { spaceFromRequest } from "@/lib/spaces";
 import { getActiveTimingCal, type TimingResult } from "@/lib/timingCal";
 
 // Compute each phone's timing bias from the reports and fold it into devices.time_offset_ms.
-export async function POST() {
+export async function POST(req: Request) {
   try {
-    const cal = await getActiveTimingCal();
+    const cal = await getActiveTimingCal((await spaceFromRequest(req)).id);
     if (!cal) return fail("No timing calibration is running", 409);
 
     const { data: reports, error } = await db()
@@ -60,6 +61,6 @@ export async function POST() {
     if (doneErr) throw doneErr;
     return json(done);
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

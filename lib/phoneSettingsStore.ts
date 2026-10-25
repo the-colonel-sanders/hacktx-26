@@ -1,26 +1,28 @@
 import "server-only";
 import type { PhoneSettings } from "./phoneSettings";
+import { DEFAULT_SPACE_ID } from "./spaces";
 import { db } from "./supabase";
 
-const ALL_PHONES_KEY = "phone_defaults";
+// One all-phones layer per demo space. The shared space keeps the key from before spaces existed.
+const allPhonesKey = (spaceId: string) => (spaceId === DEFAULT_SPACE_ID ? "phone_defaults" : `phone_defaults:${spaceId}`);
 
-/** The all-phones layer (only the keys set from the admin panel's "All phones" row). */
-export async function getAllPhonesSettings(): Promise<Partial<PhoneSettings>> {
-  const { data, error } = await db().from("app_settings").select("value").eq("key", ALL_PHONES_KEY).maybeSingle();
+/** The all-phones layer (only the keys set from the admin panel's "All phones" row) for one space. */
+export async function getAllPhonesSettings(spaceId: string): Promise<Partial<PhoneSettings>> {
+  const { data, error } = await db().from("app_settings").select("value").eq("key", allPhonesKey(spaceId)).maybeSingle();
   if (error) throw error;
   return (data?.value ?? {}) as Partial<PhoneSettings>;
 }
 
-/** Change a setting for every phone: it goes into the all-phones layer and replaces any phone's own value. */
-export async function applyToAllPhones(patch: Partial<PhoneSettings>): Promise<void> {
-  const current = await getAllPhonesSettings();
+/** Change a setting for every phone in a space: it goes into the all-phones layer and replaces any phone's own value. */
+export async function applyToAllPhones(spaceId: string, patch: Partial<PhoneSettings>): Promise<void> {
+  const current = await getAllPhonesSettings(spaceId);
   const { error } = await db()
     .from("app_settings")
-    .upsert({ key: ALL_PHONES_KEY, value: { ...current, ...patch }, updated_at: new Date().toISOString() });
+    .upsert({ key: allPhonesKey(spaceId), value: { ...current, ...patch }, updated_at: new Date().toISOString() });
   if (error) throw error;
 
   const keys = Object.keys(patch);
-  const { data: devices, error: devErr } = await db().from("devices").select("id, settings");
+  const { data: devices, error: devErr } = await db().from("devices").select("id, settings").eq("space_id", spaceId);
   if (devErr) throw devErr;
   for (const d of devices as { id: string; settings: Record<string, unknown> | null }[]) {
     if (!d.settings || !keys.some((k) => k in d.settings!)) continue;

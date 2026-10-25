@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { inBounds, nearestRoom, type Room } from "@/lib/floorplan";
 import { MAX_GPS_ACCURACY_M } from "@/lib/geo";
-import { fail, json, parseBody } from "@/lib/http";
+import { fail, failFrom, json, parseBody } from "@/lib/http";
+import { spaceFromRequest, touchSpace } from "@/lib/spaces";
 import { db } from "@/lib/supabase";
 
 // Check in on the demo floor plan — by room (position = room center) or exact x/y in meters (room = nearest one) —
@@ -36,6 +37,8 @@ export async function POST(req: Request) {
   const { deviceId, x, y, lat, lng, accuracyM, label, clockOffsetMs, clockRttMs } = parsed.data;
 
   try {
+    // A phone belongs to the space it last checked in to.
+    const space = await spaceFromRequest(req);
     let roomId: string | null = null;
     if (lat == null) {
       const { data: rooms, error: roomErr } = await db().from("rooms").select("id, name, x, y");
@@ -51,6 +54,7 @@ export async function POST(req: Request) {
       .from("devices")
       .upsert({
         id: deviceId ?? crypto.randomUUID(),
+        space_id: space.id,
         frame,
         room_id: roomId,
         x: x ?? null,
@@ -66,9 +70,10 @@ export async function POST(req: Request) {
       .select("id")
       .single();
     if (error) return fail(error.message, 500);
+    await touchSpace(space.id);
 
-    return json({ deviceId: data.id, frame, roomId, x: x ?? null, y: y ?? null, lat: lat ?? null, lng: lng ?? null });
+    return json({ deviceId: data.id, space: space.code, frame, roomId, x: x ?? null, y: y ?? null, lat: lat ?? null, lng: lng ?? null });
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

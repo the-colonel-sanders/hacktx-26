@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CAL_MAX_ACCURACY_M } from "@/lib/geo";
-import { fail, json, parseBody } from "@/lib/http";
+import { fail, failFrom, json, parseBody } from "@/lib/http";
 import { db } from "@/lib/supabase";
 import { getActiveTimingCal } from "@/lib/timingCal";
 
@@ -13,12 +13,13 @@ export async function POST(req: Request) {
   const { deviceId, localSpikeTsMs, peakDb } = parsed.data;
 
   try {
-    const cal = await getActiveTimingCal();
-    if (!cal) return fail("No timing calibration is running", 409);
-
     const { data: device, error: devErr } = await db().from("devices").select("*").eq("id", deviceId).maybeSingle();
     if (devErr) throw devErr;
     if (!device) return fail("Unknown deviceId", 404);
+
+    // The calibration running in this phone's space.
+    const cal = await getActiveTimingCal(device.space_id);
+    if (!cal) return fail("No timing calibration is running", 409);
     if ((device.frame ?? "grid") !== cal.frame) {
       return fail(`This calibration is on the ${cal.frame === "geo" ? "real map" : "demo floor plan"}; check in the same way`);
     }
@@ -58,6 +59,6 @@ export async function POST(req: Request) {
     if (error) throw error;
     return json({ calibrationId: cal.id, kept: "this report" });
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

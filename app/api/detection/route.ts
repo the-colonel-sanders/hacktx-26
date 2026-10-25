@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { posSigmaM, type Frame, type LatLng } from "@/lib/geo";
-import { fail, json, parseBody } from "@/lib/http";
+import { fail, failFrom, json, parseBody } from "@/lib/http";
 import { getOrCreateActiveIncident, type FrameInit } from "@/lib/incidents";
 import { SHOT_WINDOW_MS, timeSigmaMs } from "@/lib/localize";
 import { localizePending } from "@/lib/localizeIncident";
+import { touchSpace } from "@/lib/spaces";
 import { db } from "@/lib/supabase";
 
 const Body = z.object({
@@ -43,8 +44,10 @@ export async function POST(req: Request) {
     // 2. First confirmed detection raises the building-wide alert and fixes which map the incident is on.
     const init: FrameInit = frame === "geo" ? { frame: "geo", origin: deviceLatLng! } : { frame: "grid" };
     const [{ incident }] = await Promise.all([
-      getOrCreateActiveIncident(init),
+      // The phone's own space: it reports into the space it checked in to.
+      getOrCreateActiveIncident(device.space_id, init),
       db().from("devices").update({ last_seen: new Date().toISOString() }).eq("id", deviceId),
+      touchSpace(device.space_id),
     ]);
     if (incident.frame !== frame) {
       return fail(
@@ -109,6 +112,6 @@ export async function POST(req: Request) {
       pending: !ran,
     });
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return failFrom(e);
   }
 }

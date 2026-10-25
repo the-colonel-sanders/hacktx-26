@@ -133,7 +133,7 @@ export default function PhonePage() {
   const addLog = (text: string, tone?: LogEntry["tone"]) =>
     setLog((l) => [{ t: Date.now(), text, tone }, ...l].slice(0, 8));
 
-  // Pre-fill the location from the URL (?room=203 from a QR code, or ?x=7.5&y=2), else the last one used.
+  // Pre-fill the location from the URL (?room=203 or ?x=7.5&y=2), else the last one used.
   // The admin panel decides which kind of location the phone gives; this only fills in the picker.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
@@ -201,13 +201,24 @@ export default function PhonePage() {
     } catch {}
   }, []);
 
+  // Which demo space this phone is in: Realtime updates are filtered to it.
+  const [space, setSpace] = useState<{ id: string; code: string; name: string | null; shared: boolean } | null>(null);
+  useEffect(() => {
+    fetch("/api/spaces/current", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setSpace)
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     refreshIncident();
     const poll = setInterval(refreshIncident, POLL_MS);
+    if (!space) return () => clearInterval(poll);
+    const inSpace = `space_id=eq.${space.id}`;
     const channel = browserDb()
-      .channel("phone-alerts")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "alerts" }, refreshIncident)
-      .on("postgres_changes", { event: "*", schema: "public", table: "incidents" }, (p) => {
+      .channel(`phone-alerts-${space.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "alerts", filter: inSpace }, refreshIncident)
+      .on("postgres_changes", { event: "*", schema: "public", table: "incidents", filter: inSpace }, (p) => {
         const row = p.new as { id: string; status: string; best_room_id: string | null; best_label: string | null };
         if (row?.status === "active") setIncident({ id: row.id, best_room_id: row.best_room_id, best_label: row.best_label });
         else refreshIncident();
@@ -217,7 +228,7 @@ export default function PhonePage() {
       clearInterval(poll);
       browserDb().removeChannel(channel);
     };
-  }, [refreshIncident]);
+  }, [refreshIncident, space]);
 
   // New incident: buzz (no sound — it could give away where people are hiding) and reset status.
   const incidentId = incident?.id;
