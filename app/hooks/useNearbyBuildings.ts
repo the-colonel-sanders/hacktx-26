@@ -8,12 +8,7 @@ export function useNearbyBuildings(event: GunshotEvent | null) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!event) {
-      setData(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
+    if (!event) return;
     const ctrl = new AbortController();
     setLoading(true); setError(null);
 

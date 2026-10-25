@@ -40,8 +40,7 @@ const ROUTES: [string, string, string][] = [
 
 export default function Home() {
 
-  const [latestGunshot, setLatestGunshot] = useState<GunshotEvent | null>(null)
-  
+  const [latestGunshot, setLatestGunshot] = useState<GunshotEvent | null>({ id: "t1", lat: 30.2672, lng: -97.7431, timestamp: "" })
   useEffect(() => {
     const tick = async () => {
       try {
@@ -66,7 +65,6 @@ export default function Home() {
     return () => clearInterval(t);
   }, []);
   const { data, loading, error } = useNearbyBuildings(latestGunshot);
-  console.log(latestGunshot, data, loading, error);
 
   return (
     <main className={s.page}>
