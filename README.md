@@ -1,92 +1,334 @@
-# Gunshot Detection & Localization — Server
+<div align="center">
 
-Next.js (App Router) API + Supabase (Postgres + Realtime). Phones POST gunshot detections (metadata only, never audio); the server groups them into shots, localizes the source with a grid search over the floor plan, and raises a building-wide alert. Clients subscribe to `incidents`, `alerts` and `statuses` via Supabase Realtime.
+# Distributed Acoustic Incident Localization
 
-## Setup
+### HackTX 2026 · School Safety Prototype
 
-### 1. Env vars
+**This is A phone-based sensor network that compares sound timing and loudness to estimate where a sudden acoustic event originated.**
 
-```sh
+**Next.js** · **TypeScript** · **Web Audio API** · **Supabase**
+
+[How it works](#how-it-works) · [Run locally](#getting-started) · [Demo](#testing-and-demonstration) · [API](#api-reference)
+
+</div>
+
+> [!IMPORTANT]
+> **Research and hackathon demonstration only.** This prototype is not a validated gunshot detector, a guaranteed way to locate a person, or an emergency dispatch system. Do not use its results to make real emergency-response decisions.
+
+## Overview
+
+During a possible emergency, a single report often cannot establish where a sound originated. Our prototype explores whether **multiple participating smartphones** can provide a more useful shared picture.
+
+Each phone joins the network at a known position and, when its user starts a listening session, analyzes microphone input **on the device**. If it identifies a sharp acoustic impulse, it sends limited metadata to a central server: **which phone detected it, when it was detected, and how loud it was**. The server compares reports from different phones and searches for a possible source location. The application displays the resulting estimate and incident information.
+
+The central idea is straightforward: **the same sound generally reaches nearby phones sooner and louder than more distant phones**. The server uses those differences, rather than any one phone's report, to estimate where the sound might have originated.
+
+
+
+## How it works
+
+### 1. Register each phone
+
+Participants open the existing [`/phone`](app/phone) interface and press **Start listening**.
+
+(will update this section when code is updated)
+
+### 2. Detect a sharp sound locally
+
+The phone requests microphone permission and uses the **Web Audio API** and an **AudioWorklet** to identify sudden sound spikes.
+
+When a spike occurs, the app passes a short audio sample to the classifier. The current classifier looks for a fast rise and decay in sound level. **It is a placeholder impulse detector, not a trained AI gunshot classifier.** Claps and other sharp noises may trigger it.
+
+The short audio samples are processed in the browser. The demonstrated detection request does **not** upload raw audio recordings.
+
+### 3. Compare observations from different phones
+
+For each accepted detection, a phone sends the server:
+
+| Field | Why it matters |
+| --- | --- |
+| `deviceId` | Identifies the sensor and its registered location |
+| `localSpikeTsMs` | Records when that phone detected the sound |
+| `peakDb` | Provides a relative measurement of sound level |
+| `confidence` | Reports the local classifier's score |
+| `label` | Describes the type of event detected by the classifier |
+
+The server associates reports that may describe the same event. It can then compare arrival times and loudness across the registered sensors.
+
+### 4. Estimate a source location
+
+Rather than taking the nearest or loudest phone as the answer, the TypeScript localizer in [`lib/localize.ts`](lib/localize.ts) examines many **possible source locations**.
+
+At each candidate point it asks two questions:
+
+1. **Timing:** If a sound originated here, would its travel time explain when the different phones heard it?
+2. **Loudness:** Would this point reasonably explain why some phones reported a stronger impulse than others?
+
+
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/a6ab38aa-b61c-421e-adff-c0ee8f32c1f5" />
+
+
+*The illustrated dB levels and arrival order are examples for the sake of explanation, not measured data. Microphone sensitivity and sound reflections can affect loudness as well as distance.*
+
+> **What does the map show?** An **estimated acoustic origin**, not the exact confirmed position of a person. Sensor placement, echoes, microphone differences, GPS errors, and synchronization can all shift the result.
+
+### 5. Show incident information
+
+The server uses Supabase for incident-related data and Realtime updates. The phone interface can display an active incident, an estimated room, and optional status reporting such as **safe**, **need help**, or **injured**. There is also an optional lockdown-style screen for demonstration.
+
+**For this prototype, alerts and estimated locations must be treated as test information**, not verified emergency instructions.
+
+## Why synchronization and calibration matter
+
+For localization, the phones must measure the **same event** in ways that can be compared.
+
+| Component | Role | Current implementation |
+| --- | --- | --- |
+| **Clock synchronization** | Helps put phones' event timestamps on a common time scale | Multiple `/api/time` requests; the best round-trip sample is retained and synchronization repeats periodically |
+| **Microphone calibration** | Helps compensate for differences in device microphone levels | User makes a controlled clap; a gain offset is recorded |
+| **Timing calibration** | Tests or compensates for differences in observed acoustic event timing | Separate timing-calibration workflow in the phone app |
+| **Position registration** | Tells the estimator where each microphone is | Room centers or manually selected X/Y positions |
+
+These steps improve comparability but do not prove that audio is synchronized to millisecond precision. **Real outdoor accuracy remains to be measured.**
+
+## Privacy and user control
+
+Privacy is a design priority because participating devices may be used around students.
+
+**Present in the supplied phone implementation:**
+
+- **User activation:** A participant explicitly starts listening and grants microphone permission.
+- **On-device audio analysis:** The microphone stream and short classifier samples are processed locally.
+- **Metadata-only detection reports:** The shown `/api/detection` request transmits timestamps, levels, device identity and classification results, **not audio clips**.
+- **Visible listening status:** The phone interface shows when monitoring is active.
+- **Screen-awake handling:** The browser tries to keep the session active while the page remains open, subject to device restrictions.
+
+**Proposed, not yet implemented or verified:**
+
+- Automatically stop monitoring after school hours or when an authorized session expires.
+- Minimize retention of device-location and incident metadata.
+- Add clearer controls for ending a session and managing participation.
+- Define permission and access policies appropriate for a school setting.
+
+**Privacy Note:** The application processes microphone samples locally, so it does not transmit raw audio recordings to the server.
+
+## Technologies
+
+| Technology | Purpose |
+| --- | --- |
+| **Next.js App Router + React** | Web app, phone interface, incident pages and API routes |
+| **TypeScript** | Client logic, server logic and the primary localization estimator |
+| **Web Audio API + AudioWorklet** | Microphone capture, spike detection and audio timing |
+| **Supabase (Postgres + Realtime)** | Incident storage and live application updates |
+| **Vitest** | Tests for the localization calculations |
+| **Python** | Separate exploratory scripts, not required by the main Next.js detection pipeline |
+
+## Project structure (placeholder)
+
+```text
+app/
+  api/                  Server endpoints
+  phone/                Phone UI, audio capture, detection and check-in
+  incident/             Incident interface
+  calibrate/            Calibration interface
+  qr/                   QR-based device setup
+
+lib/
+  floorplan.ts          Room positions and local map geometry
+  localize.ts           Primary grid-search localization algorithm
+  localize.test.ts      Localization tests
+  supabase.ts           Server-side Supabase helpers
+  supabaseBrowser.ts    Browser-side Realtime helpers
+  timingCal.ts          Timing calibration logic
+
+location/
+  src/                  Standalone location experiments / GPS helper
+  data/                 Local test data
+
+public/
+  spike-detector.js     AudioWorklet for impulse detection
+
+scripts/
+  simulate.ts           Generate synthetic multi-phone detections
+
+sound_changes/          Separate Python audio/localization experiments
+
+docs/assets/            Diagrams used in this README
+```
+
+The independent Python experiments are **not** the algorithm used by the main application's `lib/localize.ts`.
+
+## Getting started
+
+### Requirements
+
+- Node.js and npm, compatible with the project dependencies
+- A Supabase project configured for this application's tables and Realtime subscriptions
+- A supported browser; **HTTPS** is generally required for microphone and geolocation permission on phones
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure environment variables
+
+Copy the existing example environment file, if present:
+
+```bash
 cp .env.example .env.local
 ```
 
-| Var | Where to find it | Used by |
-|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API | server + browser |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Project Settings → API Keys → `sb_publishable_...` | browser only (read + Realtime) |
-| `SUPABASE_SECRET_KEY` | Project Settings → API Keys → `sb_secret_...` | **server only** — never expose to the browser |
+Add the keys documented by the project:
 
-### 2. Schema + seed
+| Variable | Use |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe Supabase publishable key |
+| `SUPABASE_SECRET_KEY` | Server-side only; **never expose it to client code or commit it** |
 
-In the Supabase dashboard → SQL Editor, run `supabase/schema.sql` and then `supabase/seed.sql`. Both can be re-run safely. (Or from a terminal: `psql "$DB_URL" -f supabase/schema.sql -f supabase/seed.sql`.)
+If initializing a new database, apply the project's SQL schema and seed data. The previous project README referenced `supabase/schema.sql` and `supabase/seed.sql`; **confirm those files are present in the branch you are using** before following that step.
 
-The seed creates 5 classrooms (201–205, 6 m apart along y = 0) and 3 hallway zones at y = 4. Keep `ROOMS` in `lib/floorplan.ts` in sync with the seed if you change it — the simulator uses it.
+The documented seed uses classrooms **201–205** and several hallway reference zones. If you edit the map or seed, keep the server's database positions and [`lib/floorplan.ts`](lib/floorplan.ts) consistent.
 
-### 3. Run
+### 3. Start the application
 
-```sh
-npm install
-npm run dev        # http://localhost:3000
-npm test           # vitest: localization math
+```bash
+npm run dev
 ```
 
-### 4. Simulate a shooting
+Open **http://localhost:3000** on the development computer.
 
-With the dev server running:
+### 4. Run tests
 
-```sh
-npx tsx scripts/simulate.ts 9 2                                   # source at (9, 2) m
-npx tsx scripts/simulate.ts 2 -2 http://localhost:3000 --shots 3 --move 4   # moving source
-npx tsx scripts/simulate.ts 9 2 https://your-app.vercel.app       # against a deployment
+```bash
+npm test
 ```
 
-It checks in one fake phone per room (random clock skew ±3 s and mic gain ±6 dB, corrected by clock sync + calibration), then posts each phone's detection with ±5 ms / ±2 dB jitter, and prints the estimate vs. the true source. It sends **all-clear first** to start a fresh incident; pass `--keep` to add to the current one.
+This is expected to run the project's Vitest localization tests, as documented in the existing README. It does **not** validate outdoor microphone or GPS precision.
 
-### 5. Deploy to Vercel
+## Testing and demonstration
 
-1. Push to GitHub, import the repo in Vercel (framework auto-detected as Next.js).
-2. Add the three env vars under Project → Settings → Environment Variables.
-3. Deploy. Point phones at `https://<app>.vercel.app/api/...`.
+### Option A: Synthetic multi-phone demo
 
-### 6. Real phones
+With the development server running, execute:
 
-Open `/phone` on each phone (or scan a room's code from `/qr`), pick the room, and tap **Start listening**. Tap **Calibrate** and clap once about 1 m away.
+```bash
+npx tsx scripts/simulate.ts 9 2
+```
 
-The mic only works over HTTPS, and phones can't reach `localhost`. Use one of these:
-- **Vercel deploy** (easiest), or
-- **A tunnel:** `ngrok http 3000`, then open the https URL on the phones, or
-- **Local HTTPS:** `npm run dev:https`, then open `https://<laptop-LAN-IP>:3000` and accept the certificate warning.
+The arguments specify the **simulated source position in local meters**, here `(9, 2)`.
 
-Phone code lives in `app/phone/`:
-- `audio.ts` opens the mic and timestamps each spike at the moment it reached the mic.
-- `api.ts` handles clock sync, check-in (repeated every 3 min) and sending with retries.
-- `detector.ts` is a **placeholder** that accepts any sharp impulse, including claps. Replace `classify()` with your model.
+For multiple simulated events with a moving source:
 
-## API
+```bash
+npx tsx scripts/simulate.ts 2 -2 http://localhost:3000 --shots 3 --move 4
+```
 
-All bodies are JSON; invalid input returns `400 { error }`.
+The simulator registers fake phones at the predefined room positions, introduces synthetic clock skew and microphone gain differences, posts fabricated sound detections, and reports the **known simulated position versus the calculated estimate**.
 
-| Route | Body | Returns |
-|---|---|---|
-| `GET /api/time` | — | `{ serverTime }` |
-| `POST /api/checkin` | `{ deviceId?, roomId?, x?, y?, lat?, lng?, clockOffsetMs }`: send `roomId` or `x`/`y` in meters (room = nearest) | `{ deviceId, roomId, x, y }` |
-| `POST /api/calibrate` | `{ deviceId, peakDb }` | `{ deviceId, gainOffsetDb }` |
-| `POST /api/detection` | `{ deviceId, localSpikeTsMs, peakDb, confidence, label }` | `{ incidentId, estimate: { x, y, roomId, deviceCount } }` |
-| `POST /api/status` | `{ deviceId, status: "safe" \| "need_help" \| "injured" }` | `{ deviceId, roomId, status }` |
-| `POST /api/alert` | — | `{ incidentId }` |
-| `POST /api/all-clear` | — | `{ incidentId }` |
-| `GET /api/incidents/current` | — | active incident + `detections`, or `null` |
+Additional flags documented by the current script:
 
-**Clock sync (phone side):** call `/api/time` ~5 times; for each, `offset = serverTime − (t0 + t1)/2`; keep the sample with the smallest `t1 − t0`. Send that as `clockOffsetMs` on check-in.
+| Flag | Meaning |
+| --- | --- |
+| `--shots 3` | Number of simulated events |
+| `--move 4` | Move the simulated source 4 m along X between events |
+| `--rooms 202,204` | Limit the synthetic sensor set |
+| `--keep` | Preserve an existing incident instead of clearing it first |
 
-**Heatmap format:** `{ width, height, resolution, originX, originY, values }`, row-major — cell `(col, row)` is at `(originX + col·resolution, originY + row·resolution)`, value `values[row·width + col]` in 0..1.
+**Simulated error is not real-world accuracy.** Synthetic data follow simplifying assumptions that actual phones and environments may violate.
 
-## Localization
+### Option B: Phones listening to harmless test sounds
 
-`lib/localize.ts` — pure functions, tunables exported at the top (`LOUD_SIGMA_DB`, `TIME_SIGMA_*`, `CLIP_DB`, `SHOT_WINDOW_MS`, ...). For every 0.5 m cell, cost = χ² of the loudness model (inverse-square falloff with fitted source level, σ = 4 dB; clipped peaks count only as lower bounds) + χ² of arrival times (fitted fire time; each detection's σ from timing calibration, clock-sync round trip and position accuracy). The best cell is the estimate; the heatmap is exp(−Δχ²/2), the likelihood relative to that cell, so the ≥ 0.1 region is roughly a 90% confidence area.
+1. Start the application using an **HTTPS deployment or tunnel** reachable from the phones, such as a Vercel deployment or an ngrok HTTPS tunnel.
+2. Open `/phone` on each participating device.
+3. Choose a room or local X/Y spot and press **Start listening**; grant microphone permission.
+4. Use the app's calibration controls where appropriate.
+5. Make a **controlled clap** in an authorized test area and check the activity log and incident display.
+6. Compare any reported location with the known test spot. Record the errors across repeated tests rather than reporting a single best case.
 
-Known limit: phones only report their room center, and loudness/order can't tell which side of a line of phones a sound came from. That's why the hallway has three reference zones — with a single hallway point, sources near the ends often get mirrored across y = 0.
+Do not use real weapons or alarming simulated gunfire in a public space for testing.
 
-## Python trilateration prototype
+> [!NOTE]
+> **Browsers impose practical restrictions.** A local URL such as `http://192.168.x.x:3000` generally does not provide the secure context needed for mobile microphone and GPS APIs. Also, locked screens and background browser tabs can suspend listening. The app attempts to keep screens awake but cannot guarantee uninterrupted recording.
 
-Trilateration software in `sound_changes/src/` (`localization.py`, `audio_processing.py`, `microphone.py`, `test_audio_localization.py`), sample audio in `sound_changes/audio/`. Install with `pip install -r sound_changes/requirements.txt`.
+## GPS integration (work in progress)
+
+The browser-side GPS helper obtains the **device's estimated latitude and longitude** after permission is granted:
+
+```typescript
+import { getLocation } from "@/location/src/static_location_finder";
+
+const { latitude, longitude } = await getLocation();
+```
+
+The import path above assumes the current helper is `location/src/static_location_finder.ts`; adjust it if the file is renamed.
+
+This function can be called from a **client-side** Next.js component. It cannot run directly in a Node.js server function or standalone Python script.
+
+For integration with the existing localization model, the intended process is:
+
+1. Obtain the phone's GPS coordinates at check-in.
+2. Convert each position into a shared local **X/Y coordinate system in meters**.
+3. Send and store those coordinates against the registered device ID.
+4. Continue using the existing detection API, which already identifies each phone by ID.
+
+**Current status:** The helper exists independently. The shown `/phone` page still uses room/manual X/Y selection, and GPS-to-check-in conversion has not been confirmed as integrated. GPS also returns an estimate, **not an exact physical position**.
+
+## API reference
+
+The existing app documents these JSON endpoints. Check the individual route implementations before changing request fields.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/time` | Server time for approximate clock alignment |
+| `POST` | `/api/checkin` | Register/update device position and clock information |
+| `POST` | `/api/calibrate` | Register a microphone gain calibration measurement |
+| `POST` | `/api/detection` | Report a detected acoustic event |
+| `POST` | `/api/status` | Report a participant's status for the active incident |
+| `POST` | `/api/alert` | Trigger an incident alert |
+| `POST` | `/api/all-clear` | Clear an active incident |
+| `GET` | `/api/incidents/current` | Read the active incident |
+
+The phone client also uses **timing calibration** endpoints (`/api/timing-cal` and `/api/timing-cal/report`).
+
+**Detection request example** (illustrative values):
+
+```json
+{
+  "deviceId": "example-device-id",
+  "localSpikeTsMs": 1792886400123.5,
+  "peakDb": -16.2,
+  "confidence": 0.83,
+  "label": "impulse (placeholder)"
+}
+```
+
+**Check-in location formats currently used by the phone client:**
+
+```json
+{ "roomId": "203" }
+```
+
+or
+
+```json
+{ "x": 9.0, "y": 2.0 }
+```
+
+The client adds its device ID and clock synchronization values before sending the actual check-in request. GPS latitude/longitude should **not** simply be substituted for meter-based `x`/`y`.
+
+
+
+### Responsible use
+
+This prototype **estimates the origin of an acoustic event**, not the identity or present location of a shooter. False positives and large position errors are possible. Any future deployment in schools would require independent validation, consent and data policies, secure access controls, and a clear process for human review.
+
+---
+
+<div align="center">
+
+**Built for HackTX 2026** · Experimental distributed sensing for safer, more informed emergency response.
+
+</div>
