@@ -237,3 +237,130 @@
   font-weight: 600;
   text-align: left;
 }
+
+/* Status reports. Status colors always come with an icon and a label. */
+
+.stInjured {
+  --st: var(--critical);
+  --st-ink: #fff;
+}
+
+.stHelp {
+  --st: #fab219;
+  --st-ink: #0b0b0b;
+}
+
+.stSafe {
+  --st: var(--good);
+  --st-ink: #fff;
+}
+
+.toasts {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  z-index: 1000;
+  display: grid;
+  gap: 8px;
+  width: min(340px, calc(100vw - 32px));
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.toast {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-left: 6px solid var(--st);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  animation: toastIn 180ms ease-out;
+}
+
+@keyframes toastIn {
+  from {
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+}
+
+.toastIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--st);
+  color: var(--st-ink);
+  font-weight: 800;
+}
+
+.toastBody {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.toastBody b {
+  font-size: 14px;
+}
+
+.toastTime {
+  color: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.toastClose {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--ink-2);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.stCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.stChip {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--st);
+  color: var(--st-ink);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.stList li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+}
