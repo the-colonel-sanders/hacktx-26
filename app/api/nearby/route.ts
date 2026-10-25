@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     const result = { eventId, fetchedAt: new Date().toISOString(), buildings };
     setCached(key, result);
     return NextResponse.json(result);
-  } catch (e) {
+  } catch {
     return NextResponse.json({ error: "Upstream lookup failed" }, { status: 502 });
   }
 }
