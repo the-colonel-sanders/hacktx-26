@@ -7,6 +7,7 @@ import { ACCURACY_PER_SIGMA, type Frame } from "@/lib/geo";
 import type { TrailPoint } from "@/lib/incidents";
 import { SHOT_WINDOW_MS, type Heatmap } from "@/lib/localize";
 import FloorMap from "./FloorMap";
+import { StatusPanel, StatusToasts, type StatusView } from "./StatusAlerts";
 import s from "./incident.module.css";
 
 export type Detection = {
@@ -56,6 +57,7 @@ export type IncidentView = {
   detection_count: number;
   detections: Detection[];
   devices: DeviceView[]; // recently active phones on the incident's map
+  statuses: StatusView[]; // status reports sent during this incident
 };
 
 const POLL_MS = 1000;
@@ -130,6 +132,8 @@ export default function IncidentPage() {
 
       {incident && (
         <>
+          <StatusToasts statuses={incident.statuses ?? []} />
+
           <section className={s.stats}>
             <Stat label="Estimated location" value={incident.best_label ?? roomName(incident.best_room_id)} />
             <Stat
@@ -144,11 +148,17 @@ export default function IncidentPage() {
             />
             <Stat label="Shots" value={String(incident.trail.length)} />
             <Stat label="Detections" value={String(incident.detection_count)} />
+            <Stat
+              label="Need help / injured"
+              value={String((incident.statuses ?? []).filter((st) => st.status !== "safe").length)}
+            />
           </section>
 
           <section className={s.card}>
             {incident.frame === "geo" ? <GeoMap incident={incident} /> : <FloorMap incident={incident} />}
           </section>
+
+          <StatusPanel statuses={incident.statuses ?? []} />
 
           <section className={s.card}>
             <h2 className={s.h2}>Detections</h2>

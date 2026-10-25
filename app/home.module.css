@@ -155,3 +155,39 @@
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 4px 16px;
 }
+
+.links {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.page .linkCard {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.page .linkCard:hover {
+  border-color: var(--heat);
+}
+
+.linkTitle {
+  font-weight: 600;
+  color: var(--heat);
+}
+
+.linkDesc {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.steps ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}

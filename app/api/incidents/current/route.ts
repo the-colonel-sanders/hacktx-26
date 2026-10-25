@@ -19,15 +19,26 @@ export async function GET() {
       .select("id, frame, room_id, x, y, lat, lng, pos_accuracy_m, place_label")
       .gte("last_seen", since);
     if (incident.frame) devicesQuery = devicesQuery.eq("frame", incident.frame);
-    const [{ data: detections, error }, { data: devices, error: devErr }, { data: rooms, error: roomsErr }] =
-      await Promise.all([
-        db().from("detections").select("*").eq("incident_id", incident.id).order("spike_ts_ms"),
-        devicesQuery,
-        db().from("rooms").select("id, name, x, y"),
-      ]);
+    const [
+      { data: detections, error },
+      { data: devices, error: devErr },
+      { data: rooms, error: roomsErr },
+      { data: statuses, error: stErr },
+    ] = await Promise.all([
+      db().from("detections").select("*").eq("incident_id", incident.id).order("spike_ts_ms"),
+      devicesQuery,
+      db().from("rooms").select("id, name, x, y"),
+      // Status reports sent during this incident (one row per phone, latest wins).
+      db()
+        .from("statuses")
+        .select("device_id, status, updated_at, devices(frame, room_id, x, y, lat, lng, place_label)")
+        .gte("updated_at", incident.started_at)
+        .order("updated_at", { ascending: false }),
+    ]);
     if (error) throw error;
     if (devErr) throw devErr;
     if (roomsErr) throw roomsErr;
+    if (stErr) throw stErr;
 
     // Resolve every floor-plan position (exact x/y, else room center) so clients don't have to. Map rows keep lat/lng.
     const roomById = new Map((rooms as Room[]).map((r) => [r.id, r]));
@@ -36,7 +47,37 @@ export async function GET() {
       ...positionOf(row, roomById),
     });
 
-    return json({ ...incident, detections: detections.map(withPos), devices: devices.map(withPos) });
+    // Where each reporting phone is, in words responders can act on.
+    type StatusDevice = {
+      frame: string | null;
+      room_id: string | null;
+      x: number | null;
+      y: number | null;
+      lat: number | null;
+      lng: number | null;
+      place_label: string | null;
+    };
+    const roomName = (id: string | null) => roomById.get(id ?? "")?.name ?? id ?? "unknown room";
+    const statusRows = statuses.map((st) => {
+      const d = st.devices as unknown as StatusDevice | null;
+      const place = !d
+        ? "unknown location"
+        : d.place_label
+          ? d.place_label
+          : d.frame === "geo" && d.lat != null && d.lng != null
+            ? `${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}`
+            : d.x != null && d.y != null
+              ? `(${d.x}, ${d.y}) m · near ${roomName(d.room_id)}`
+              : roomName(d.room_id);
+      return { device_id: st.device_id, status: st.status, updated_at: st.updated_at, place };
+    });
+
+    return json({
+      ...incident,
+      detections: detections.map(withPos),
+      devices: devices.map(withPos),
+      statuses: statusRows,
+    });
   } catch (e) {
     return fail((e as Error).message, 500);
   }
