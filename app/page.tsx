@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { ROOMS } from "@/lib/floorplan";
 import s from "./home.module.css";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import NearbyBuildingsPanel from "@/app/components/NearbyBuildingsPanel";
 import { useNearbyBuildings } from "@/app/hooks/useNearbyBuildings";
 import type { GunshotEvent } from "@/app/types/nearby";
@@ -40,7 +40,30 @@ const ROUTES: [string, string, string][] = [
 
 export default function Home() {
 
-  const [latestGunshot, setLatestGunshot] = useState<GunshotEvent | null>(null);
+  const [latestGunshot, setLatestGunshot] = useState<GunshotEvent | null>({ id: "t1", lat: 30.2672, lng: -97.7431, timestamp: "" })
+  useEffect(() => {
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/incidents/current");
+        if (!r.ok) return;
+        const inc = await r.json();
+        const est = inc?.estimate; // verify this path, see below
+        if (!est || typeof est.lat !== "number" || typeof est.lng !== "number") {
+          setLatestGunshot(null);
+          return;
+        }
+        const id = String(inc.id ?? inc.incidentId ?? `${est.lat},${est.lng}`);
+        setLatestGunshot(prev =>
+          prev?.id === id && prev.lat === est.lat && prev.lng === est.lng
+            ? prev
+            : { id, lat: est.lat, lng: est.lng, timestamp: new Date().toISOString() }
+        );
+      } catch {}
+    };
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => clearInterval(t);
+  }, []);
   const { data, loading, error } = useNearbyBuildings(latestGunshot);
 
   return (
@@ -236,6 +259,7 @@ export default function Home() {
       </section>
 
       <section className={s.card}>
+        <h2>Buildings</h2>
         {/* new */}
         <div className="w-96 border-l">
           <NearbyBuildingsPanel data={data} loading={loading} error={error} />
