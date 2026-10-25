@@ -2,7 +2,7 @@ import Link from "next/link";
 import Logo from "./components/Logo";
 import Sonar from "./components/Sonar";
 import s from "./landing.module.css";
-
+// Steps for the user
 const STEPS = [
   {
     n: "01",
